@@ -1038,6 +1038,19 @@
   }
   .prog-btn-partial:hover:not(.prog-btn-active) { border-color: var(--gold); color: var(--gold); }
 
+  /* ─ 「進んでいない」ボタン ─ */
+  .prog-btn-not-progressed {
+    background: var(--paper); color: var(--ink-soft);
+    border-color: var(--paper-line);
+  }
+  .prog-btn-not-progressed.prog-btn-active {
+    background: #ede3e3; color: #7d4242; border-color: #c4a0a0;
+  }
+  .prog-btn-not-progressed:hover:not(.prog-btn-active) { border-color: var(--ink-soft); color: var(--ink); }
+
+  /* ─ step1ラベル：進んでいない状態 ─ */
+  .prog-step1-label.step-not-progressed::before { background: var(--ink-soft); }
+
   /* ─ ステータスバッジ（既存記録あり時） ─ */
   .prog-status-wrap { margin-top: 6px; }
 
