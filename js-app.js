@@ -171,9 +171,9 @@ function buildAllReviews(){
   const vocabChunks = entries.flatMap(computeAdjustedChunksForEntry);
   const vocabReviews = [];
   vocabChunks.forEach(c => {
-    // 進捗記録があるチャンクは進捗ベースの復習を後段で生成するためスキップ
+    // 【修正箇所1】originEntryId または entryId で進捗記録の有無を判定
     const hasProgressRecord = dailyProgress.some(p =>
-      p.type === 'word' && p.entryId === c.entryId && p.date === c.date
+      p.type === 'word' && (p.originEntryId || p.entryId) === c.entryId && p.date === c.date
     );
     if (hasProgressRecord) return;
     (c.intervals || []).forEach(n => {
@@ -191,19 +191,21 @@ function buildAllReviews(){
 
   // ── 進捗ベースの単語復習（実際に進んだ範囲で DEFAULT_INTERVALS の復習を自動生成）──
   dailyProgress
-    .filter(p => p.type === 'word' && !p.notProgressed)  // ← notProgressed: true のレコードは復習生成をスキップ
+    .filter(p => p.type === 'word' && !p.notProgressed)  // notProgressed: true のレコードは復習生成をスキップ
     .forEach(p => {
-      const entry = entries.find(e => e.id === p.entryId);
+      // 【修正箇所2】originEntryId を優先して元の単語帳データ（entry）を取得
+      const resolvedEntryId = p.originEntryId || p.entryId;
+      const entry = entries.find(e => e.id === resolvedEntryId);
       if (!entry) return;
-      const reviewWeekdays = entry.reviewWeekdays || []; // ★復習曜日設定を取得
+      const reviewWeekdays = entry.reviewWeekdays || [];
       DEFAULT_INTERVALS.forEach(n => {
-        const originalDate = findNextReviewWeekday(p.date, n, reviewWeekdays); // ★曜日ベースに変更
-        const key = `w_prog_${p.entryId}_${p.date}_${p.plannedStart}_${n}`;
+        const originalDate = findNextReviewWeekday(p.date, n, reviewWeekdays);
+        const key = `w_prog_${resolvedEntryId}_${p.date}_${p.plannedStart}_${n}`;
         const eff = computeEffectiveReviewDate(originalDate, key, reviewWeekdays);
         vocabReviews.push({
           date: eff.date, originalDate,
           rangeStart: p.plannedStart, rangeEnd: p.actualEnd,
-          interval: n, key: eff.movedKey || key, entryId: p.entryId,
+          interval: n, key: eff.movedKey || key, entryId: resolvedEntryId,
           delayedDays: eff.delayedDays, done: eff.done
         });
       });
@@ -212,23 +214,19 @@ function buildAllReviews(){
   const refChunks = refEntries.flatMap(plan =>
     computeAdjustedRefSchedule(plan).map(c => ({ ...c, bookName: plan.bookName, planId: plan.id }))
   );
-  // 参考書の復習は「進捗入力」をトリガーに生成する。
-  // dailyProgress の book タイプレコードを走査し、
-  // 実際に記録した日 + DEFAULT_INTERVALS で復習予定を作成する。
+
   const refReviews = [];
   dailyProgress
-    .filter(p => p.type === 'book' && !p.notProgressed)  // ← notProgressed: true のレコードは復習生成をスキップ
+    .filter(p => p.type === 'book' && !p.notProgressed)
     .forEach(p => {
-      // planId があればそれを使い、なければ後方互換として entryId をそのまま試みる
       const resolvedPlanId = p.planId || p.entryId;
       const plan = refEntries.find(r => r.id === resolvedPlanId);
       if (!plan) return;
-      const reviewWeekdays = plan.reviewWeekdays || []; // ★復習曜日設定を取得
+      const reviewWeekdays = plan.reviewWeekdays || [];
       const actualStart = p.plannedStart;
       const actualEnd   = p.actualEnd;
       DEFAULT_INTERVALS.forEach(n => {
-        const originalDate = findNextReviewWeekday(p.date, n, reviewWeekdays); // ★曜日ベースに変更
-        // キー：resolvedPlanId + 記録日 + 記録開始ページ + インターバル で一意に識別
+        const originalDate = findNextReviewWeekday(p.date, n, reviewWeekdays);
         const key = `r_prog_${resolvedPlanId}_${p.date}_${actualStart}_${n}`;
         const eff = computeEffectiveReviewDate(originalDate, key, reviewWeekdays);
         refReviews.push({
