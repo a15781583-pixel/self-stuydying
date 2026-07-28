@@ -173,8 +173,13 @@ function buildAllReviews(){
 
   vocabChunks.forEach(c => {
     // 該当日の計画に対して進捗記録（完了・途中・進捗なし問わず）が存在するか判定
+    // composite key でも照合する（繰り越し後に入力したケースに対応）
+    const chunkKey = `${c.entryId}_${c.date}_${c.rangeStart}`;
     const hasProgressRecord = dailyProgress.some(p =>
-      p.type === 'word' && (p.originEntryId || p.entryId) === c.entryId && p.date === c.date
+      p.type === 'word' && (
+        p.entryId === chunkKey ||                                          // 繰り越し後に入力したケース
+        (p.date === c.date && (p.originEntryId || p.entryId) === c.entryId) // 通常ケース
+      )
     );
     // 進捗入力済みの計画からは当初の復習を作らない
     if (hasProgressRecord) return;
@@ -271,9 +276,12 @@ function getCarryForwardChunks(vocabChunks, refChunks) {
       if (latest && latest.actualEnd >= chunk.rangeEnd) return false;
       // この日付に何らかの進捗記録があれば残量は再配分済み
       // ★ composite key 新形式（originEntryId）・旧形式（entryId）の両方に対応
+      const chunkKey = `${chunk.entryId}_${chunk.date}_${chunk.rangeStart}`;
       const hasRecord = dailyProgress.some(p =>
-        p.date === chunk.date && p.type === 'word' &&
-        (p.originEntryId || p.entryId) === chunk.entryId
+        p.type === 'word' && (
+          p.entryId === chunkKey ||
+          (p.date === chunk.date && (p.originEntryId || p.entryId) === chunk.entryId)
+        )
       );
       return !hasRecord; // 記録なし → 繰り上げ対象
     })
@@ -400,7 +408,7 @@ function getLatestProgress(entryId, type) {
       // word: originEntryId（composite key 新形式）または entryId（旧形式）で照合
       return (p.originEntryId || p.entryId) === entryId;
     })
-    .sort((a, b) => b.date.localeCompare(a.date));
+    .sort((a, b) => b.date.localeCompare(a.date) || b.actualEnd - a.actualEnd);
   return records[0] || null;
 }
 
