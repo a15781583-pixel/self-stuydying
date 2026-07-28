@@ -287,22 +287,30 @@ function getCarryForwardChunks(vocabChunks, refChunks) {
     })
     .map(chunk => ({ ...chunk, date: todayStr, carriedForward: true, originalDate: chunk.date }));
 
-  const cfRef = refChunks
-    .filter(chunk => chunk.date < todayStr)
-    .filter(chunk => {
-      const latest = getLatestProgress(chunk.planId, 'book');
-      if (latest && latest.actualEnd >= chunk.rangeEnd) return false;
-      // 新形式（複合キー）または旧形式（planIdそのまま）どちらの記録も検出する
-      const hasRecord = dailyProgress.some(p => {
-        if (p.type !== 'book' || p.date !== chunk.date) return false;
-        const resolvedPlanId = p.planId || p.entryId;
-        return resolvedPlanId === chunk.planId;
-      });
-      return !hasRecord;
-    })
-    .map(chunk => ({ ...chunk, date: todayStr, carriedForward: true, originalDate: chunk.date }));
+    const cfRef = refChunks
+        .filter(chunk => chunk.date < todayStr)
+        .filter(chunk => {
+          const latest = getLatestProgress(chunk.planId, 'book');
+          if (latest && latest.actualEnd >= chunk.rangeEnd) return false;
+          
+          // 変更点: 複合キー（chunkKey）を生成し、p.entryId と照合するロジックを追加
+          const chunkKey = `${chunk.planId}_${chunk.date}_${chunk.rangeStart}`;
+          const hasRecord = dailyProgress.some(p => {
+            if (p.type !== 'book') return false;
+            if (p.entryId === chunkKey) return true; // 新形式の複合キーに一致するか
+            
+            // 旧形式の判定
+            if (p.date === chunk.date) {
+              const resolvedPlanId = p.planId || p.entryId;
+              return resolvedPlanId === chunk.planId;
+            }
+            return false;
+          });
+          return !hasRecord;
+        })
+        .map(chunk => ({ ...chunk, date: todayStr, carriedForward: true, originalDate: chunk.date }));
 
-  return { cfVocab, cfRef };
+    return { cfVocab, cfRef };
 }
 
 /**
@@ -313,10 +321,14 @@ function isReviewFromOriginalSchedule(review, cfChunk, type) {
   const ownerId = type === 'word' ? cfChunk.entryId : cfChunk.planId;
   const prefix = type === 'word' ? 'w' : 'r';
   const expectedKey = buildReviewKey(prefix, ownerId, cfChunk.rangeStart, cfChunk.rangeEnd, review.interval);
-  if (review.key !== expectedKey) return false;
+  
+  // 変更点: 完全一致だけでなく、移動済みのキー(_moved_)も判定に含める
+  if (review.key !== expectedKey && !review.key.startsWith(expectedKey + '_moved_')) return false;
+  
   const expectedOriginal = formatISO(addDays(parseISO(cfChunk.originalDate), review.interval));
   return review.originalDate === expectedOriginal;
 }
+
 
 function adjustReviewsForCarryForward(vocabReviews, refReviews, cfVocab, cfRef) {
   const filteredVocabReviews = vocabReviews.filter(r =>
@@ -885,7 +897,7 @@ function renderIntegratedSchedule() {
 
     let progressSectionHtml = '';
     if (i === 0) {
-      const dayWordsForProgress = rawWordChunks.filter(c => c.date.startsWith(dateStr));
+      const dayWordsForProgress = allWordChunks.filter(c => c.date.startsWith(dateStr));
       // 繰り越し分も含めた allBookChunks を使うことで、繰り越し参考書も進捗入力対象にする
       const dayBooksForProgress = allBookChunks.filter(c => c.date.startsWith(dateStr));
       // 未完了の復習タスクも進捗入力対象にする
@@ -925,7 +937,7 @@ function renderIntegratedSchedule() {
     `;
 
     if (i === 0) {
-      const dayWordsForProgress = rawWordChunks.filter(c => c.date.startsWith(dateStr));
+      const dayWordsForProgress = allWordChunks.filter(c => c.date.startsWith(dateStr));
       const dayBooksForProgress = allBookChunks.filter(c => c.date.startsWith(dateStr));
       const dayWordReviewsForProgress2 = dayWordReviews.filter(r => !r.done);
       const dayBookReviewsForProgress2 = dayBookReviews.filter(r => !r.done);
