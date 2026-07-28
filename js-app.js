@@ -169,40 +169,44 @@ function computeEffectiveReviewDate(originalIso, key, reviewWeekdays){
 //   残りのスケジュールを自動再配分する。
 function buildAllReviews(){
   const vocabChunks = entries.flatMap(computeAdjustedChunksForEntry);
-  const vocabReviews = [];
+  const rawVocabReviews = [];
+
   vocabChunks.forEach(c => {
-    // 【修正箇所1】originEntryId または entryId で進捗記録の有無を判定
+    // 該当日の計画に対して進捗記録（完了・途中・進捗なし問わず）が存在するか判定
     const hasProgressRecord = dailyProgress.some(p =>
       p.type === 'word' && (p.originEntryId || p.entryId) === c.entryId && p.date === c.date
     );
+    // 進捗入力済みの計画からは当初の復習を作らない
     if (hasProgressRecord) return;
+
     (c.intervals || []).forEach(n => {
       const originalDate = formatISO(addDays(parseISO(c.date), n));
       const key = buildReviewKey('w', c.entryId, c.rangeStart, c.rangeEnd, n);
       const entryForChunk = entries.find(e => e.id === c.entryId);
       const reviewWeekdays = entryForChunk?.reviewWeekdays || [];
       const eff = computeEffectiveReviewDate(originalDate, key, reviewWeekdays);
-      vocabReviews.push({
+      rawVocabReviews.push({
         date: eff.date, originalDate, rangeStart: c.rangeStart, rangeEnd: c.rangeEnd,
-        interval: n, key: eff.movedKey || key, delayedDays: eff.delayedDays, done: eff.done
+        interval: n, key: eff.movedKey || key, delayedDays: eff.delayedDays, done: eff.done,
+        entryId: c.entryId
       });
     });
   });
 
-  // ── 進捗ベースの単語復習（実際に進んだ範囲で DEFAULT_INTERVALS の復習を自動生成）──
+  // 進捗ベースの単語復習
   dailyProgress
-    .filter(p => p.type === 'word' && !p.notProgressed)  // notProgressed: true のレコードは復習生成をスキップ
+    .filter(p => p.type === 'word' && !p.notProgressed)
     .forEach(p => {
-      // 【修正箇所2】originEntryId を優先して元の単語帳データ（entry）を取得
       const resolvedEntryId = p.originEntryId || p.entryId;
       const entry = entries.find(e => e.id === resolvedEntryId);
       if (!entry) return;
       const reviewWeekdays = entry.reviewWeekdays || [];
       DEFAULT_INTERVALS.forEach(n => {
         const originalDate = findNextReviewWeekday(p.date, n, reviewWeekdays);
-        const key = `w_prog_${resolvedEntryId}_${p.date}_${p.plannedStart}_${n}`;
+        // 進捗日付と範囲を含めた一意のキーを生成
+        const key = `w_prog_${resolvedEntryId}_${p.date}_${p.plannedStart}_${p.actualEnd}_${n}`;
         const eff = computeEffectiveReviewDate(originalDate, key, reviewWeekdays);
-        vocabReviews.push({
+        rawVocabReviews.push({
           date: eff.date, originalDate,
           rangeStart: p.plannedStart, rangeEnd: p.actualEnd,
           interval: n, key: eff.movedKey || key, entryId: resolvedEntryId,
@@ -215,7 +219,7 @@ function buildAllReviews(){
     computeAdjustedRefSchedule(plan).map(c => ({ ...c, bookName: plan.bookName, planId: plan.id }))
   );
 
-  const refReviews = [];
+  const rawRefReviews = [];
   dailyProgress
     .filter(p => p.type === 'book' && !p.notProgressed)
     .forEach(p => {
@@ -223,21 +227,27 @@ function buildAllReviews(){
       const plan = refEntries.find(r => r.id === resolvedPlanId);
       if (!plan) return;
       const reviewWeekdays = plan.reviewWeekdays || [];
-      const actualStart = p.plannedStart;
-      const actualEnd   = p.actualEnd;
       DEFAULT_INTERVALS.forEach(n => {
         const originalDate = findNextReviewWeekday(p.date, n, reviewWeekdays);
-        const key = `r_prog_${resolvedPlanId}_${p.date}_${actualStart}_${n}`;
+        const key = `r_prog_${resolvedPlanId}_${p.date}_${p.plannedStart}_${p.actualEnd}_${n}`;
         const eff = computeEffectiveReviewDate(originalDate, key, reviewWeekdays);
-        refReviews.push({
+        rawRefReviews.push({
           date: eff.date, originalDate,
-          rangeStart: actualStart, rangeEnd: actualEnd,
+          rangeStart: p.plannedStart, rangeEnd: p.actualEnd,
           interval: n, bookName: plan.bookName,
           planId: resolvedPlanId, key: eff.movedKey || key,
           delayedDays: eff.delayedDays, done: eff.done
         });
       });
     });
+
+  // 【修正】一意な key を基準に重複した復習タスクを除外
+  const vocabReviews = Array.from(
+    new Map(rawVocabReviews.map(r => [r.key, r])).values()
+  );
+  const refReviews = Array.from(
+    new Map(rawRefReviews.map(r => [r.key, r])).values()
+  );
 
   return { vocabChunks, refChunks, vocabReviews, refReviews };
 }
