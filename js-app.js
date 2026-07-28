@@ -278,7 +278,7 @@ function getCarryForwardChunks(vocabChunks, refChunks) {
       // ★ composite key 新形式（originEntryId）・旧形式（entryId）の両方に対応
       const chunkKey = `${chunk.entryId}_${chunk.date}_${chunk.rangeStart}`;
       const hasRecord = dailyProgress.some(p =>
-        p.type === 'word' && (
+        p.type === 'word' && !p.notProgressed && (
           p.entryId === chunkKey ||
           (p.date === chunk.date && (p.originEntryId || p.entryId) === chunk.entryId)
         )
@@ -297,6 +297,7 @@ function getCarryForwardChunks(vocabChunks, refChunks) {
           const chunkKey = `${chunk.planId}_${chunk.date}_${chunk.rangeStart}`;
           const hasRecord = dailyProgress.some(p => {
             if (p.type !== 'book') return false;
+            if (p.notProgressed) return false;
             if (p.entryId === chunkKey) return true; // 新形式の複合キーに一致するか
             
             // 旧形式の判定
@@ -445,19 +446,38 @@ function computeAdjustedChunksForEntry(entry) {
   const remaining = totalEnd - actualEnd;
 
   if (futureChunks.length === 0) {
-    // 将来チャンクがない場合：翌学習日として最初の曜日一致日を生成
-    const nextDate = findNextStudyDay(latest.date, entry.weekdays);
-    return [
-      ...pastChunks,
-      {
+    // 将来チャンクがない場合：planMode に応じた1日量で複数の学習日に再分割して生成する
+    let amountPerDay;
+    if (entry.planMode === 'byAmount') {
+      amountPerDay = entry.amountPerDay;
+    } else {
+      // byDate モード：元チャンクの平均1日量を算出
+      amountPerDay = originalChunks.length > 0
+        ? Math.ceil((entry.endNum - entry.startNum + 1) / originalChunks.length)
+        : remaining;
+    }
+    amountPerDay = Math.max(1, amountPerDay);
+
+    const newChunks = [];
+    let cursor = actualEnd + 1;
+    let searchFrom = latest.date;
+    let safety = 0;
+    while (cursor <= totalEnd && safety++ < 3650) {
+      const nextDate = findNextStudyDay(searchFrom, entry.weekdays);
+      const count = Math.min(amountPerDay, totalEnd - cursor + 1);
+      newChunks.push({
         date: nextDate,
-        rangeStart: actualEnd + 1,
-        rangeEnd: totalEnd,
+        rangeStart: cursor,
+        rangeEnd: cursor + count - 1,
         entryId: entry.id,
         intervals: entry.intervals,
-        isCarriedNew: true // ★未完了由来の新規タスクフラグ
-      }
-    ];
+        isAdjusted: true,
+        isCarriedNew: newChunks.length === 0 // 最初のチャンクのみ繰越フラグ
+      });
+      cursor += count;
+      searchFrom = nextDate;
+    }
+    return [...pastChunks, ...newChunks];
   }
 
   // ★ 翌学習日（futureChunks[0]）に未完了分をまとめて先頭追加し、残りを均等配分
@@ -501,7 +521,38 @@ function computeAdjustedRefSchedule(plan) {
   const totalEnd = plan.endNum;
 
   if (actualEnd >= totalEnd) return pastChunks;
-  if (futureChunks.length === 0) return pastChunks;
+  if (futureChunks.length === 0) {
+    // 将来チャンクがない場合：planMode に応じた1日量で複数の学習日に再分割して生成する
+    let amountPerDay;
+    if (plan.planMode === 'byAmount') {
+      amountPerDay = plan.amountPerDay;
+    } else {
+      // byDate モード：元チャンクの平均1日量を算出
+      amountPerDay = originalChunks.length > 0
+        ? Math.ceil((plan.endNum - plan.startNum + 1) / originalChunks.length)
+        : remaining;
+    }
+    amountPerDay = Math.max(1, amountPerDay);
+
+    const newChunks = [];
+    let cursor = actualEnd + 1;
+    let searchFrom = latest.date;
+    let safety = 0;
+    while (cursor <= totalEnd && safety++ < 3650) {
+      const nextDate = findNextStudyDay(searchFrom, plan.weekdays);
+      const count = Math.min(amountPerDay, totalEnd - cursor + 1);
+      newChunks.push({
+        date: nextDate,
+        rangeStart: cursor,
+        rangeEnd: cursor + count - 1,
+        isAdjusted: true,
+        isCarriedNew: newChunks.length === 0 // 最初のチャンクのみ繰越フラグ
+      });
+      cursor += count;
+      searchFrom = nextDate;
+    }
+    return [...pastChunks, ...newChunks];
+  }
 
   const remaining = totalEnd - actualEnd;
   const base = Math.floor(remaining / futureChunks.length);
@@ -1605,6 +1656,14 @@ function handleProgressSave(dateStr, baseId) {
         notProgressed: val === plannedStart - 1  // ← 追加: 進捗なし（actualEnd === plannedStart - 1）のフラグ
       };
       dailyProgress.push(record);
+      // ── reviewDoneSet を進捗状態と連動して更新 ──
+      // val が plannedEnd に達していれば完了済みとしてセットに追加し、
+      // 未達の場合（途中・進捗なし含む）は削除してカレンダーに残すようにする。
+      if (val >= plannedEnd) {
+        reviewDoneSet.add(reviewKey);
+      } else {
+        reviewDoneSet.delete(reviewKey);
+      }
       savedRecords.push(record);
       saved++;
     } else {
@@ -1644,6 +1703,7 @@ function handleProgressSave(dateStr, baseId) {
 
   saveDailyProgress();
   // スケジュール全体を再描画（進捗に基づき再計算される）
+  saveReviewDone(); // ← 追加：reviewDoneSet の変更を永続化
   renderIntegratedSchedule();
   refreshAllSchedules();
   renderRefTodayCard();
