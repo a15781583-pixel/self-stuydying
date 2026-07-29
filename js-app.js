@@ -729,7 +729,7 @@ function computeChunksForEntry(entry){
       }
       daysAdded++;
       // 安全装置（万が一の無限ループ防止：最大1年）
-      if (daysAdded > 365) break;
+      if (daysAdded > 3650) break;
     }
   } 
   // 【ここから変更】開始日から終了日までの期間で均等割り当て
@@ -769,6 +769,7 @@ function computeChunksForEntry(entry){
 
 function renderEntryList(){
   const list = document.getElementById('entryList');
+  if(!list) return;
   list.innerHTML = '';
   if(entries.length === 0) return;
   entries.forEach(entry => {
@@ -1824,7 +1825,7 @@ function buildWordReviewPreviewHtml(dateStr, wordRecords) {
     }
 
     // ── 通常の進捗レコード ──
-    const entry = entries.find(e => e.id === rec.entryId);
+    const entry = entries.find(e => e.id === (rec.originEntryId || rec.entryId));
     if (!entry) return;
 
     hasAnyReview = true;
@@ -2128,7 +2129,7 @@ function renderLeech(){
       <tr>
        <td>
         ${w.word}
-        <button onclick="speakWord('${w.word}')" style="background:none; border:none; cursor:pointer; font-size:1rem; margin-left:6px;">🔊</button>
+        <button onclick="speakWord(${JSON.stringify(w.word)})" style="background:none; border:none; cursor:pointer; font-size:1rem; margin-left:6px;">🔊</button>
         ${w.missCount >= LEECH_WARN_THRESHOLD ? '<span class="badge-warn">要注意</span>' : ''}
        </td>
        <td>${w.nextReviewDate}</td>
