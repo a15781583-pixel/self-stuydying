@@ -175,12 +175,15 @@ function buildAllReviews(){
     // 該当日の計画に対して進捗記録（完了・途中・進捗なし問わず）が存在するか判定
     // composite key でも照合する（繰り越し後に入力したケースに対応）
     const chunkKey = `${c.entryId}_${c.date}_${c.rangeStart}`;
-    const hasProgressRecord = dailyProgress.some(p =>
-      p.type === 'word' && (
-        p.entryId === chunkKey ||                                          // 繰り越し後に入力したケース
-        (p.date === c.date && (p.originEntryId || p.entryId) === c.entryId) // 通常ケース
-      )
-    );
+    const hasProgressRecord = dailyProgress.some(p => {
+      if (p.type !== 'word') return false;
+      // 新形式（originEntryId が存在する）は複合キーで完全一致のみ
+      if (p.originEntryId != null) {
+        return p.entryId === chunkKey;
+      }
+      // 旧形式：日付とエントリーIDで照合
+      return p.date === c.date && p.entryId === c.entryId;
+    });
     // 進捗入力済みの計画からは当初の復習を作らない
     if (hasProgressRecord) return;
 
@@ -231,8 +234,12 @@ function buildAllReviews(){
     const chunkKey = `${c.planId}_${c.date}_${c.rangeStart}`;
     const hasProgressRecord = dailyProgress.some(p => {
       if (p.type !== 'book') return false;
-      if (p.entryId === chunkKey) return true; // 複合キー（新形式）
-      return p.date === c.date && (p.planId || p.entryId) === c.planId; // 旧形式
+      // 新形式（planId が entryId と異なる = entryId が複合キー）は完全一致のみ
+      if (p.planId && p.planId !== p.entryId) {
+        return p.entryId === chunkKey;
+      }
+      // 旧形式：日付とプランIDで照合
+      return p.date === c.date && (p.planId || p.entryId) === c.planId;
     });
     // 進捗入力済みの計画からは当初の復習を作らない
     if (hasProgressRecord) return;
@@ -304,12 +311,15 @@ function getCarryForwardChunks(vocabChunks, refChunks) {
       // この日付に何らかの進捗記録があれば残量は再配分済み
       // ★ composite key 新形式（originEntryId）・旧形式（entryId）の両方に対応
       const chunkKey = `${chunk.entryId}_${chunk.date}_${chunk.rangeStart}`;
-      const hasRecord = dailyProgress.some(p =>
-        p.type === 'word' && !p.notProgressed && (
-          p.entryId === chunkKey ||
-          (p.date === chunk.date && (p.originEntryId || p.entryId) === chunk.entryId)
-        )
-      );
+      const hasRecord = dailyProgress.some(p => {
+        if (p.type !== 'word' || p.notProgressed) return false;
+        // 新形式（originEntryId が存在する）は複合キーで完全一致のみ
+        if (p.originEntryId != null) {
+          return p.entryId === chunkKey;
+        }
+        // 旧形式：日付とエントリーIDで照合
+        return p.date === chunk.date && p.entryId === chunk.entryId;
+      });
       return !hasRecord; // 記録なし → 繰り上げ対象
     })
     .map(chunk => ({ ...chunk, date: todayStr, carriedForward: true, originalDate: chunk.date }));
@@ -325,9 +335,11 @@ function getCarryForwardChunks(vocabChunks, refChunks) {
           const hasRecord = dailyProgress.some(p => {
             if (p.type !== 'book') return false;
             if (p.notProgressed) return false;
-            if (p.entryId === chunkKey) return true; // 新形式の複合キーに一致するか
-            
-            // 旧形式の判定
+            // 新形式（planId が entryId と異なる = entryId が複合キー）は完全一致のみ
+            if (p.planId && p.planId !== p.entryId) {
+              return p.entryId === chunkKey;
+            }
+            // 旧形式：日付とプランIDで照合
             if (p.date === chunk.date) {
               const resolvedPlanId = p.planId || p.entryId;
               return resolvedPlanId === chunk.planId;
@@ -528,7 +540,13 @@ function computeAdjustedSchedule(materialType, material) {
       isFromProgress: true
     }));
 
-  const futureChunks = originalChunks.filter(c => c.date > latest.date);
+  // ▼ BUGFIX: todayStr を先に定義（futureChunks の基準として利用）
+  const todayStr = todayISO();
+  // ▼ BUGFIX Step 1: 基準を latest.date（進捗入力日）→ todayStr（今日）に変更
+  //   過去の繰越タスクを「今日」入力しても latest.date が today になるため、
+  //   c.date > latest.date では今日の元スケジュールが除外されてしまっていた。
+  //   常に「明日以降」を未来分として扱うことで消失を防ぐ。
+  const futureChunks = originalChunks.filter(c => c.date > todayStr);
 
   const remainingStart = latest.actualEnd + 1;
   const remainingEnd   = material.endNum;
@@ -537,10 +555,15 @@ function computeAdjustedSchedule(materialType, material) {
   if (remaining <= 0) return pastChunks; // 全完了
 
   // [Step 2] 今日の残キャパシティを確認し、未完了分を今日から順に割り当て
-  const todayStr = todayISO();
-  const todayCapacity = (latest.date === todayStr && latest.plannedEnd != null)
-    ? Math.max(0, latest.plannedEnd - latest.actualEnd)
-    : 0;
+  // ▼ BUGFIX Step 2: 直近の進捗レコードの残量（latest.plannedEnd - latest.actualEnd）ではなく
+  //   「元々今日に予定されていた originalChunks の量（remainingStart 以降の部分）」を基準にする。
+  //   繰越タスクを完了した場合は latest.plannedEnd - latest.actualEnd = 0 になってしまい、
+  //   今日の元スケジュール分がキャパとして計上されなかった。
+  const todayOriginalChunks = originalChunks.filter(c => c.date === todayStr);
+  const todayCapacity = todayOriginalChunks.reduce((sum, c) => {
+    const effectiveStart = Math.max(c.rangeStart, remainingStart);
+    return sum + Math.max(0, c.rangeEnd - effectiveStart + 1);
+  }, 0);
 
   const todayChunks = [];
   let futureStart = remainingStart;
@@ -562,7 +585,7 @@ function computeAdjustedSchedule(materialType, material) {
   if (futureRemaining <= 0) return [...pastChunks, ...todayChunks];
 
   // [Step 3] 将来チャンクがない場合：新規タスクを生成して配分
-  if (futureChunks.length === 0) {
+  if (futureChunks.length === 0 || material.planMode === 'byAmount') {
     const amountPerDay = Math.max(1,
       material.planMode === 'byAmount'
         ? material.amountPerDay
