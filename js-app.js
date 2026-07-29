@@ -192,7 +192,7 @@ function buildAllReviews(){
       const eff = computeEffectiveReviewDate(originalDate, key, reviewWeekdays);
       rawVocabReviews.push({
         date: eff.date, originalDate, rangeStart: c.rangeStart, rangeEnd: c.rangeEnd,
-        interval: n, key: eff.movedKey || key, delayedDays: eff.delayedDays, done: eff.done,
+        interval: n, key: key, delayedDays: eff.delayedDays, done: eff.done,
         entryId: c.entryId
       });
     });
@@ -214,7 +214,7 @@ function buildAllReviews(){
         rawVocabReviews.push({
           date: eff.date, originalDate,
           rangeStart: p.plannedStart, rangeEnd: p.actualEnd,
-          interval: n, key: eff.movedKey || key, entryId: resolvedEntryId,
+          interval: n, key: key, entryId: resolvedEntryId,
           delayedDays: eff.delayedDays, done: eff.done
         });
       });
@@ -240,7 +240,7 @@ function buildAllReviews(){
           date: eff.date, originalDate,
           rangeStart: p.plannedStart, rangeEnd: p.actualEnd,
           interval: n, bookName: plan.bookName,
-          planId: resolvedPlanId, key: eff.movedKey || key,
+          planId: resolvedPlanId, key: key,
           delayedDays: eff.delayedDays, done: eff.done
         });
       });
@@ -324,7 +324,7 @@ function isReviewFromOriginalSchedule(review, cfChunk, type) {
   const expectedKey = buildReviewKey(prefix, ownerId, cfChunk.rangeStart, cfChunk.rangeEnd, review.interval);
   
   // 変更点: 完全一致だけでなく、移動済みのキー(_moved_)も判定に含める
-  if (review.key !== expectedKey && !review.key.startsWith(expectedKey + '_moved_')) return false;
+  if (review.key !== expectedKey) return false;
   
   const expectedOriginal = formatISO(addDays(parseISO(cfChunk.originalDate), review.interval));
   return review.originalDate === expectedOriginal;
@@ -347,7 +347,7 @@ function adjustReviewsForCarryForward(vocabReviews, refReviews, cfVocab, cfRef) 
       const eff = computeEffectiveReviewDate(originalDate, key, reviewWeekdays);
       filteredVocabReviews.push({
         date: eff.date, originalDate, rangeStart: c.rangeStart, rangeEnd: c.rangeEnd,
-        interval: n, key: eff.movedKey || key, delayedDays: eff.delayedDays, done: eff.done
+        interval: n, key: key, delayedDays: eff.delayedDays, done: eff.done
       });
     });
   });
@@ -431,40 +431,90 @@ function getLatestProgress(entryId, type) {
  * - 将来チャンクがない場合は翌曜日一致日に新規タスクとして生成する
  */
 function computeAdjustedChunksForEntry(entry) {
-  const latest = getLatestProgress(entry.id, 'word'); // originEntryId でフィルタ
+  const latest = getLatestProgress(entry.id, 'word');
   if (!latest) return computeChunksForEntry(entry);
 
   const originalChunks = computeChunksForEntry(entry);
-  const pastChunks = originalChunks.filter(c => c.date <= latest.date);
+
+  // [Step 1] dailyProgressから実績のみ構築
+  const pastChunks = dailyProgress
+    .filter(p =>
+      p.type === 'word' &&
+      !p.notProgressed &&
+      (p.originEntryId || p.entryId) === entry.id
+    )
+    .map(p => ({
+      date: p.date,
+      rangeStart: p.plannedStart,
+      rangeEnd: p.actualEnd,
+      entryId: entry.id,
+      intervals: entry.intervals,
+      isFromProgress: true
+    }));
+
   const futureChunks = originalChunks.filter(c => c.date > latest.date);
 
   const actualEnd = latest.actualEnd;
   const totalEnd  = entry.endNum;
 
-  if (actualEnd >= totalEnd) return pastChunks; // 全完了
+  // [Step 2] 未完了タスクの範囲を明示的に算出（日付は未割り当て）
+  const remainingStart = actualEnd + 1;
+  const remainingEnd   = totalEnd;
+  const remaining      = remainingEnd - remainingStart + 1;
 
-  const remaining = totalEnd - actualEnd;
+  if (remaining <= 0) return pastChunks; // 全完了
+
+  // [Step 3] 今日の残キャパシティを確認し、未完了分を今日から順に割り当て
+  const todayStr = todayISO();
+  // 今日の1日分の計画（plannedEnd）に対してどれだけ余裕があるかを計算
+  const todayCapacity = (latest.date === todayStr && latest.plannedEnd != null)
+    ? Math.max(0, latest.plannedEnd - latest.actualEnd)
+    : 0;
+
+  const todayChunks = [];
+  let futureStart = remainingStart; // 翌日以降への配分開始番号
+
+  if (todayCapacity > 0) {
+    // 今日の残枠に収まる分だけ今日のチャンクとして割り当て
+    const todayCount = Math.min(todayCapacity, remaining);
+    todayChunks.push({
+      date: todayStr,
+      rangeStart: remainingStart,
+      rangeEnd: remainingStart + todayCount - 1,
+      entryId: entry.id,
+      intervals: entry.intervals,
+      isAdjusted: true,
+      isCarriedNew: false // 今日中の割り当てのため繰越フラグは立てない
+    });
+    futureStart = remainingStart + todayCount;
+  }
+
+  // 今日に割り当てた分を差し引いた、翌日以降へ回すタスク量
+  const futureRemaining = remainingEnd - futureStart + 1;
+
+  if (futureRemaining <= 0) {
+    // 未完了分がすべて今日のキャパシティに収まった
+    return [...pastChunks, ...todayChunks];
+  }
 
   if (futureChunks.length === 0) {
-    // 将来チャンクがない場合：planMode に応じた1日量で複数の学習日に再分割して生成する
     let amountPerDay;
     if (entry.planMode === 'byAmount') {
       amountPerDay = entry.amountPerDay;
     } else {
-      // byDate モード：元チャンクの平均1日量を算出
       amountPerDay = originalChunks.length > 0
         ? Math.ceil((entry.endNum - entry.startNum + 1) / originalChunks.length)
-        : remaining;
+        : futureRemaining; // [Step 3] remaining → futureRemaining
     }
     amountPerDay = Math.max(1, amountPerDay);
 
     const newChunks = [];
-    let cursor = actualEnd + 1;
-    let searchFrom = latest.date;
+    let cursor = futureStart;         // [Step 3] remainingStart → futureStart
+    let searchFrom = todayStr;        // [Step 3] latest.date → todayStr（今日以降の学習日を探す）
     let safety = 0;
-    while (cursor <= totalEnd && safety++ < 3650) {
+    while (cursor <= remainingEnd && safety++ < 3650) {
       const nextDate = findNextStudyDay(searchFrom, entry.weekdays);
-      const count = Math.min(amountPerDay, totalEnd - cursor + 1);
+      const count = Math.min(amountPerDay, remainingEnd - cursor + 1);
       newChunks.push({
         date: nextDate,
         rangeStart: cursor,
@@ -472,30 +522,37 @@ function computeAdjustedChunksForEntry(entry) {
         entryId: entry.id,
         intervals: entry.intervals,
         isAdjusted: true,
-        isCarriedNew: newChunks.length === 0 // 最初のチャンクのみ繰越フラグ
+        // [Step 3] todayChunksがある場合は翌日の先頭チャンクは繰越扱いにしない
+        isCarriedNew: newChunks.length === 0 && todayChunks.length === 0
       });
       cursor += count;
       searchFrom = nextDate;
     }
-    return [...pastChunks, ...newChunks];
+    return [...pastChunks, ...todayChunks, ...newChunks];
   }
 
-  // ★ 翌学習日（futureChunks[0]）に未完了分をまとめて先頭追加し、残りを均等配分
-  const base = Math.floor(remaining / futureChunks.length);
-  const rem  = remaining % futureChunks.length;
-  let cursor = actualEnd + 1;
+  const base = Math.floor(futureRemaining / futureChunks.length); // [Step 3] remaining → futureRemaining
+  const rem  = futureRemaining % futureChunks.length;             // [Step 3] remaining → futureRemaining
+  let cursor = futureStart;                                        // [Step 3] remainingStart → futureStart
 
   const newFutureChunks = futureChunks.map((c, idx) => {
     const count = base + (idx < rem ? 1 : 0);
     const rangeStart = cursor;
     const rangeEnd   = cursor + count - 1;
     cursor = rangeEnd + 1;
-    return { ...c, rangeStart, rangeEnd, isAdjusted: true,
-             isCarriedNew: idx === 0 }; // ★翌学習日チャンクにフラグ
+    return {
+      ...c,
+      rangeStart,
+      rangeEnd,
+      isAdjusted: true,
+      // [Step 3] todayChunksがある場合は翌日の先頭チャンクは繰越扱いにしない
+      isCarriedNew: idx === 0 && todayChunks.length === 0
+    };
   });
 
-  return [...pastChunks, ...newFutureChunks];
+  return [...pastChunks, ...todayChunks, ...newFutureChunks];
 }
+
 
 // 翌学習日を求めるヘルパー（fromDate の翌日以降で weekdays に一致する最初の日を返す）
 function findNextStudyDay(fromDate, weekdays) {
@@ -514,62 +571,114 @@ function computeAdjustedRefSchedule(plan) {
   if (!latest) return computeRefSchedule(plan);
 
   const originalChunks = computeRefSchedule(plan);
-  const pastChunks = originalChunks.filter(c => c.date <= latest.date);
+
+  // [Step 1] dailyProgressから実績のみ構築
+  const pastChunks = dailyProgress
+    .filter(p =>
+      p.type === 'book' &&
+      !p.notProgressed &&
+      (p.planId === plan.id || p.entryId === plan.id)
+    )
+    .map(p => ({
+      date: p.date,
+      rangeStart: p.plannedStart,
+      rangeEnd: p.actualEnd,
+      planId: plan.id,
+      isFromProgress: true
+    }));
+
   const futureChunks = originalChunks.filter(c => c.date > latest.date);
 
   const actualEnd = latest.actualEnd;
   const totalEnd = plan.endNum;
 
-  if (actualEnd >= totalEnd) return pastChunks;
+  // [Step 2] 未完了タスクの範囲を明示的に算出（日付は未割り当て）
+  const remainingStart = actualEnd + 1;
+  const remainingEnd   = totalEnd;
+  const remaining      = remainingEnd - remainingStart + 1;
+
+  if (remaining <= 0) return pastChunks; // 全完了
+
+  // [Step 3] 今日の残キャパシティを確認し、未完了分を今日から順に割り当て
+  const todayStr = todayISO();
+  const todayCapacity = (latest.date === todayStr && latest.plannedEnd != null)
+    ? Math.max(0, latest.plannedEnd - latest.actualEnd)
+    : 0;
+
+  const todayChunks = [];
+  let futureStart = remainingStart;
+
+  if (todayCapacity > 0) {
+    const todayCount = Math.min(todayCapacity, remaining);
+    todayChunks.push({
+      date: todayStr,
+      rangeStart: remainingStart,
+      rangeEnd: remainingStart + todayCount - 1,
+      planId: plan.id,
+      isAdjusted: true,
+      isCarriedNew: false
+    });
+    futureStart = remainingStart + todayCount;
+  }
+
+  const futureRemaining = remainingEnd - futureStart + 1;
+
+  if (futureRemaining <= 0) {
+    return [...pastChunks, ...todayChunks];
+  }
+
   if (futureChunks.length === 0) {
-    // 将来チャンクがない場合：planMode に応じた1日量で複数の学習日に再分割して生成する
     let amountPerDay;
     if (plan.planMode === 'byAmount') {
       amountPerDay = plan.amountPerDay;
     } else {
-      // byDate モード：元チャンクの平均1日量を算出
       amountPerDay = originalChunks.length > 0
         ? Math.ceil((plan.endNum - plan.startNum + 1) / originalChunks.length)
-        : remaining;
+        : futureRemaining; // [Step 3] remaining → futureRemaining
     }
     amountPerDay = Math.max(1, amountPerDay);
 
     const newChunks = [];
-    let cursor = actualEnd + 1;
-    let searchFrom = latest.date;
+    let cursor = futureStart;  // [Step 3] remainingStart → futureStart
+    let searchFrom = todayStr; // [Step 3] latest.date → todayStr
     let safety = 0;
-    while (cursor <= totalEnd && safety++ < 3650) {
+    while (cursor <= remainingEnd && safety++ < 3650) {
       const nextDate = findNextStudyDay(searchFrom, plan.weekdays);
-      const count = Math.min(amountPerDay, totalEnd - cursor + 1);
+      const count = Math.min(amountPerDay, remainingEnd - cursor + 1);
       newChunks.push({
         date: nextDate,
         rangeStart: cursor,
         rangeEnd: cursor + count - 1,
         isAdjusted: true,
-        isCarriedNew: newChunks.length === 0 // 最初のチャンクのみ繰越フラグ
+        isCarriedNew: newChunks.length === 0 && todayChunks.length === 0
       });
       cursor += count;
       searchFrom = nextDate;
     }
-    return [...pastChunks, ...newChunks];
+    return [...pastChunks, ...todayChunks, ...newChunks];
   }
 
-  const remaining = totalEnd - actualEnd;
-  const base = Math.floor(remaining / futureChunks.length);
-  const rem = remaining % futureChunks.length;
-  let cursor = actualEnd + 1;
+  const base = Math.floor(futureRemaining / futureChunks.length); // [Step 3] remaining → futureRemaining
+  const rem = futureRemaining % futureChunks.length;              // [Step 3] remaining → futureRemaining
+  let cursor = futureStart;                                        // [Step 3] remainingStart → futureStart
 
   const newFutureChunks = futureChunks.map((c, idx) => {
     const count = base + (idx < rem ? 1 : 0);
     const rangeStart = cursor;
     const rangeEnd = cursor + count - 1;
     cursor = rangeEnd + 1;
-    return { ...c, rangeStart, rangeEnd, isAdjusted: true,
-             isCarriedNew: idx === 0 }; // ★翌学習日チャンクに未完了繰越フラグ（単語と統一）
+    return {
+      ...c,
+      rangeStart,
+      rangeEnd,
+      isAdjusted: true,
+      isCarriedNew: idx === 0 && todayChunks.length === 0
+    };
   });
 
-  return [...pastChunks, ...newFutureChunks];
+  return [...pastChunks, ...todayChunks, ...newFutureChunks];
 }
+
 
 /**
  * 全完了した場合の残り日数を計算（進捗が良い場合の通知用）
