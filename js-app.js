@@ -469,135 +469,6 @@ function getLatestProgress(entryId, type) {
   return records[0] || null;
 }
 
-/**
- * 進捗記録を考慮してチャンクを再計算する（単語用）
- * - 未完了分を翌学習日（futureChunks[0]）に先頭追加し、残りを均等再配分する
- * - 将来チャンクがない場合は翌曜日一致日に新規タスクとして生成する
- */
-function computeAdjustedChunksForEntry(entry) {
-  const latest = getLatestProgress(entry.id, 'word');
-  if (!latest) return computeChunksForEntry(entry);
-
-  const originalChunks = computeChunksForEntry(entry);
-
-  // [Step 1] dailyProgressから実績のみ構築
-  const pastChunks = dailyProgress
-    .filter(p =>
-      p.type === 'word' &&
-      !p.notProgressed &&
-      (p.originEntryId || p.entryId) === entry.id
-    )
-    .map(p => ({
-      date: p.date,
-      rangeStart: p.plannedStart,
-      rangeEnd: p.actualEnd,
-      entryId: entry.id,
-      intervals: entry.intervals,
-      isFromProgress: true
-    }));
-
-  const futureChunks = originalChunks.filter(c => c.date > latest.date);
-
-  const actualEnd = latest.actualEnd;
-  const totalEnd  = entry.endNum;
-
-  // [Step 2] 未完了タスクの範囲を明示的に算出（日付は未割り当て）
-  const remainingStart = actualEnd + 1;
-  const remainingEnd   = totalEnd;
-  const remaining      = remainingEnd - remainingStart + 1;
-
-  if (remaining <= 0) return pastChunks; // 全完了
-
-  // [Step 3] 今日の残キャパシティを確認し、未完了分を今日から順に割り当て
-  const todayStr = todayISO();
-  // 今日の1日分の計画（plannedEnd）に対してどれだけ余裕があるかを計算
-  const todayCapacity = (latest.date === todayStr && latest.plannedEnd != null)
-    ? Math.max(0, latest.plannedEnd - latest.actualEnd)
-    : 0;
-
-  const todayChunks = [];
-  let futureStart = remainingStart; // 翌日以降への配分開始番号
-
-  if (todayCapacity > 0) {
-    // 今日の残枠に収まる分だけ今日のチャンクとして割り当て
-    const todayCount = Math.min(todayCapacity, remaining);
-    todayChunks.push({
-      date: todayStr,
-      rangeStart: remainingStart,
-      rangeEnd: remainingStart + todayCount - 1,
-      entryId: entry.id,
-      intervals: entry.intervals,
-      isAdjusted: true,
-      isCarriedNew: false // 今日中の割り当てのため繰越フラグは立てない
-    });
-    futureStart = remainingStart + todayCount;
-  }
-
-  // 今日に割り当てた分を差し引いた、翌日以降へ回すタスク量
-  const futureRemaining = remainingEnd - futureStart + 1;
-
-  if (futureRemaining <= 0) {
-    // 未完了分がすべて今日のキャパシティに収まった
-    return [...pastChunks, ...todayChunks];
-  }
-
-  if (futureChunks.length === 0) {
-    let amountPerDay;
-    if (entry.planMode === 'byAmount') {
-      amountPerDay = entry.amountPerDay;
-    } else {
-      amountPerDay = originalChunks.length > 0
-        ? Math.ceil((entry.endNum - entry.startNum + 1) / originalChunks.length)
-        : futureRemaining; // [Step 3] remaining → futureRemaining
-    }
-    amountPerDay = Math.max(1, amountPerDay);
-
-    const newChunks = [];
-    let cursor = futureStart;         // [Step 3] remainingStart → futureStart
-    let searchFrom = todayStr;        // [Step 3] latest.date → todayStr（今日以降の学習日を探す）
-    let safety = 0;
-    while (cursor <= remainingEnd && safety++ < 3650) {
-      const nextDate = findNextStudyDay(searchFrom, entry.weekdays);
-      const count = Math.min(amountPerDay, remainingEnd - cursor + 1);
-      newChunks.push({
-        date: nextDate,
-        rangeStart: cursor,
-        rangeEnd: cursor + count - 1,
-        entryId: entry.id,
-        intervals: entry.intervals,
-        isAdjusted: true,
-        // [Step 3] todayChunksがある場合は翌日の先頭チャンクは繰越扱いにしない
-        isCarriedNew: newChunks.length === 0 && todayChunks.length === 0
-      });
-      cursor += count;
-      searchFrom = nextDate;
-    }
-    return [...pastChunks, ...todayChunks, ...newChunks];
-  }
-
-  const base = Math.floor(futureRemaining / futureChunks.length); // [Step 3] remaining → futureRemaining
-  const rem  = futureRemaining % futureChunks.length;             // [Step 3] remaining → futureRemaining
-  let cursor = futureStart;                                        // [Step 3] remainingStart → futureStart
-
-  const newFutureChunks = futureChunks.map((c, idx) => {
-    const count = base + (idx < rem ? 1 : 0);
-    const rangeStart = cursor;
-    const rangeEnd   = cursor + count - 1;
-    cursor = rangeEnd + 1;
-    return {
-      ...c,
-      rangeStart,
-      rangeEnd,
-      isAdjusted: true,
-      // [Step 3] todayChunksがある場合は翌日の先頭チャンクは繰越扱いにしない
-      isCarriedNew: idx === 0 && todayChunks.length === 0
-    };
-  });
-
-  return [...pastChunks, ...todayChunks, ...newFutureChunks];
-}
-
-
 // 翌学習日を求めるヘルパー（fromDate の翌日以降で weekdays に一致する最初の日を返す）
 function findNextStudyDay(fromDate, weekdays) {
   for (let i = 1; i <= 14; i++) {
@@ -607,43 +478,65 @@ function findNextStudyDay(fromDate, weekdays) {
   return formatISO(addDays(parseISO(fromDate), 1)); // フォールバック
 }
 
-/**
- * 進捗記録を考慮してチャンクを再計算する（参考書用）
- */
-function computeAdjustedRefSchedule(plan) {
-  const latest = getLatestProgress(plan.id, 'book');
-  if (!latest) return computeRefSchedule(plan);
-
-  const originalChunks = computeRefSchedule(plan);
-
-  // [Step 1] dailyProgressから実績のみ構築
-  const pastChunks = dailyProgress
-    .filter(p =>
+// ── 教材種別ごとの差分を設定オブジェクトに集約 ──────────────────────────
+// 「単語」と「参考書」で異なる箇所はここだけに閉じ込め、計算ループは共通化する
+const MATERIAL_CONFIGS = {
+  word: {
+    type: 'word',
+    computeBaseSchedule: (material) => computeChunksForEntry(material),
+    filterProgress: (materialId) => dailyProgress.filter(p =>
+      p.type === 'word' &&
+      !p.notProgressed &&
+      (p.originEntryId || p.entryId) === materialId
+    ),
+    // チャンクに付与する種別固有のフィールド（entryId + 復習インターバル）
+    chunkIdFields: (material) => ({ entryId: material.id, intervals: material.intervals }),
+  },
+  book: {
+    type: 'book',
+    computeBaseSchedule: (material) => computeRefSchedule(material),
+    filterProgress: (materialId) => dailyProgress.filter(p =>
       p.type === 'book' &&
       !p.notProgressed &&
-      (p.planId === plan.id || p.entryId === plan.id)
-    )
+      (p.planId === materialId || p.entryId === materialId)
+    ),
+    // チャンクに付与する種別固有のフィールド（planId のみ）
+    chunkIdFields: (material) => ({ planId: material.id }),
+  },
+};
+
+/**
+ * 進捗記録を考慮してチャンクを再計算する（単語・参考書共通）
+ * @param {'word'|'book'} materialType - 教材の種別
+ * @param {Object}        material     - entry（単語）または plan（参考書）
+ */
+function computeAdjustedSchedule(materialType, material) {
+  const cfg = MATERIAL_CONFIGS[materialType];
+  const latest = getLatestProgress(material.id, cfg.type);
+  if (!latest) return cfg.computeBaseSchedule(material);
+
+  const originalChunks = cfg.computeBaseSchedule(material);
+  const idFields = cfg.chunkIdFields(material); // 種別固有フィールドを事前に取得
+
+  // [Step 1] dailyProgressから実績のみ構築
+  const pastChunks = cfg.filterProgress(material.id)
     .map(p => ({
       date: p.date,
       rangeStart: p.plannedStart,
       rangeEnd: p.actualEnd,
-      planId: plan.id,
+      ...idFields,
       isFromProgress: true
     }));
 
   const futureChunks = originalChunks.filter(c => c.date > latest.date);
 
-  const actualEnd = latest.actualEnd;
-  const totalEnd = plan.endNum;
-
-  // [Step 2] 未完了タスクの範囲を明示的に算出（日付は未割り当て）
-  const remainingStart = actualEnd + 1;
-  const remainingEnd   = totalEnd;
+  const remainingStart = latest.actualEnd + 1;
+  const remainingEnd   = material.endNum;
   const remaining      = remainingEnd - remainingStart + 1;
 
   if (remaining <= 0) return pastChunks; // 全完了
 
-  // [Step 3] 今日の残キャパシティを確認し、未完了分を今日から順に割り当て
+  // [Step 2] 今日の残キャパシティを確認し、未完了分を今日から順に割り当て
   const todayStr = todayISO();
   const todayCapacity = (latest.date === todayStr && latest.plannedEnd != null)
     ? Math.max(0, latest.plannedEnd - latest.actualEnd)
@@ -658,7 +551,7 @@ function computeAdjustedRefSchedule(plan) {
       date: todayStr,
       rangeStart: remainingStart,
       rangeEnd: remainingStart + todayCount - 1,
-      planId: plan.id,
+      ...idFields,
       isAdjusted: true,
       isCarriedNew: false
     });
@@ -666,33 +559,30 @@ function computeAdjustedRefSchedule(plan) {
   }
 
   const futureRemaining = remainingEnd - futureStart + 1;
+  if (futureRemaining <= 0) return [...pastChunks, ...todayChunks];
 
-  if (futureRemaining <= 0) {
-    return [...pastChunks, ...todayChunks];
-  }
-
+  // [Step 3] 将来チャンクがない場合：新規タスクを生成して配分
   if (futureChunks.length === 0) {
-    let amountPerDay;
-    if (plan.planMode === 'byAmount') {
-      amountPerDay = plan.amountPerDay;
-    } else {
-      amountPerDay = originalChunks.length > 0
-        ? Math.ceil((plan.endNum - plan.startNum + 1) / originalChunks.length)
-        : futureRemaining; // [Step 3] remaining → futureRemaining
-    }
-    amountPerDay = Math.max(1, amountPerDay);
+    const amountPerDay = Math.max(1,
+      material.planMode === 'byAmount'
+        ? material.amountPerDay
+        : originalChunks.length > 0
+          ? Math.ceil((material.endNum - material.startNum + 1) / originalChunks.length)
+          : futureRemaining
+    );
 
     const newChunks = [];
-    let cursor = futureStart;  // [Step 3] remainingStart → futureStart
-    let searchFrom = todayStr; // [Step 3] latest.date → todayStr
+    let cursor = futureStart;
+    let searchFrom = todayStr;
     let safety = 0;
     while (cursor <= remainingEnd && safety++ < 3650) {
-      const nextDate = findNextStudyDay(searchFrom, plan.weekdays);
+      const nextDate = findNextStudyDay(searchFrom, material.weekdays);
       const count = Math.min(amountPerDay, remainingEnd - cursor + 1);
       newChunks.push({
         date: nextDate,
         rangeStart: cursor,
         rangeEnd: cursor + count - 1,
+        ...idFields,
         isAdjusted: true,
         isCarriedNew: newChunks.length === 0 && todayChunks.length === 0
       });
@@ -702,27 +592,26 @@ function computeAdjustedRefSchedule(plan) {
     return [...pastChunks, ...todayChunks, ...newChunks];
   }
 
-  const base = Math.floor(futureRemaining / futureChunks.length); // [Step 3] remaining → futureRemaining
-  const rem = futureRemaining % futureChunks.length;              // [Step 3] remaining → futureRemaining
-  let cursor = futureStart;                                        // [Step 3] remainingStart → futureStart
+  // [Step 4] 将来チャンクに残量を均等配分
+  const base   = Math.floor(futureRemaining / futureChunks.length);
+  const rem    = futureRemaining % futureChunks.length;
+  let cursor   = futureStart;
 
   const newFutureChunks = futureChunks.map((c, idx) => {
-    const count = base + (idx < rem ? 1 : 0);
+    const count      = base + (idx < rem ? 1 : 0);
     const rangeStart = cursor;
-    const rangeEnd = cursor + count - 1;
+    const rangeEnd   = cursor + count - 1;
     cursor = rangeEnd + 1;
-    return {
-      ...c,
-      rangeStart,
-      rangeEnd,
-      isAdjusted: true,
-      isCarriedNew: idx === 0 && todayChunks.length === 0
-    };
+    return { ...c, rangeStart, rangeEnd, isAdjusted: true,
+             isCarriedNew: idx === 0 && todayChunks.length === 0 };
   });
 
   return [...pastChunks, ...todayChunks, ...newFutureChunks];
 }
 
+// ── 後方互換ラッパー：既存の呼び出し元（buildAllReviews等）を変更ゼロに保つ ──
+function computeAdjustedChunksForEntry(entry) { return computeAdjustedSchedule('word', entry); }
+function computeAdjustedRefSchedule(plan)     { return computeAdjustedSchedule('book', plan); }
 
 /**
  * 全完了した場合の残り日数を計算（進捗が良い場合の通知用）
