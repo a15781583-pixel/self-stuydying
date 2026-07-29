@@ -225,6 +225,33 @@ function buildAllReviews(){
   );
 
   const rawRefReviews = [];
+    // ★ 追加：オリジナル計画からの参考書復習生成（単語の vocabChunks.forEach と対称）
+  refChunks.forEach(c => {
+    // 該当日の計画に対して進捗記録が存在するか判定
+    const chunkKey = `${c.planId}_${c.date}_${c.rangeStart}`;
+    const hasProgressRecord = dailyProgress.some(p => {
+      if (p.type !== 'book') return false;
+      if (p.entryId === chunkKey) return true; // 複合キー（新形式）
+      return p.date === c.date && (p.planId || p.entryId) === c.planId; // 旧形式
+    });
+    // 進捗入力済みの計画からは当初の復習を作らない
+    if (hasProgressRecord) return;
+
+    DEFAULT_INTERVALS.forEach(n => {
+      const originalDate = formatISO(addDays(parseISO(c.date), n));
+      const key = buildReviewKey('r', c.planId, c.rangeStart, c.rangeEnd, n);
+      const planForChunk = refEntries.find(r => r.id === c.planId);
+      const reviewWeekdays = planForChunk?.reviewWeekdays || [];
+      const eff = computeEffectiveReviewDate(originalDate, key, reviewWeekdays);
+      rawRefReviews.push({
+        date: eff.date, originalDate, rangeStart: c.rangeStart, rangeEnd: c.rangeEnd,
+        interval: n, bookName: c.bookName, key: key, planId: c.planId,
+        delayedDays: eff.delayedDays, done: eff.done
+      });
+    });
+  });
+
+
   dailyProgress
     .filter(p => p.type === 'book' && !p.notProgressed)
     .forEach(p => {
@@ -335,8 +362,10 @@ function adjustReviewsForCarryForward(vocabReviews, refReviews, cfVocab, cfRef) 
   const filteredVocabReviews = vocabReviews.filter(r =>
     !cfVocab.some(cf => isReviewFromOriginalSchedule(r, cf, 'word'))
   );
-  // 参考書の復習は進捗記録ベースで生成されるため、cfRef による調整は不要
-  const filteredRefReviews = refReviews;
+  // ★ 修正：参考書もオリジナル計画ベースの復習を持つため、cfRef で古い復習を除去する
+  const filteredRefReviews = refReviews.filter(r =>
+    !cfRef.some(cf => isReviewFromOriginalSchedule(r, cf, 'book'))
+  );
 
   cfVocab.forEach(c => {
     (c.intervals || []).forEach(n => {
@@ -352,7 +381,21 @@ function adjustReviewsForCarryForward(vocabReviews, refReviews, cfVocab, cfRef) 
     });
   });
 
-  // cfRef は進捗記録ベースの復習生成に統合されるためここでは追加しない
+  // ★ 修正：cfRef の繰越チャンクから新しい日付基準で復習を再生成（単語の cfVocab と対称）
+  cfRef.forEach(c => {
+    DEFAULT_INTERVALS.forEach(n => {
+      const originalDate = formatISO(addDays(parseISO(c.date), n));
+      const key = buildReviewKey('r', c.planId, c.rangeStart, c.rangeEnd, n);
+      const planForCf = refEntries.find(r => r.id === c.planId);
+      const reviewWeekdays = planForCf?.reviewWeekdays || [];
+      const eff = computeEffectiveReviewDate(originalDate, key, reviewWeekdays);
+      filteredRefReviews.push({
+        date: eff.date, originalDate, rangeStart: c.rangeStart, rangeEnd: c.rangeEnd,
+        interval: n, bookName: c.bookName, key: key, planId: c.planId,
+        delayedDays: eff.delayedDays, done: eff.done
+      });
+    });
+  });
 
   return { vocabReviews: filteredVocabReviews, refReviews: filteredRefReviews };
 }
@@ -413,6 +456,7 @@ function getLatestProgress(entryId, type) {
   const records = dailyProgress
     .filter(p => {
       if (p.type !== type) return false;
+      if (p.notProgressed) return false; // ★「進んでいない」レコードは再計算の起点から除外
       if (type === 'book') {
         // planId が一致、または entryId が一致（後方互換）、または entryId が planId で始まる（複合キー）
         const resolvedPlanId = p.planId || p.entryId;
