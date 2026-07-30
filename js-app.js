@@ -206,7 +206,7 @@ function buildAllReviews(){
       const eff = computeEffectiveReviewDate(originalDate, key, reviewWeekdays);
       rawVocabReviews.push({
         date: eff.date, originalDate, rangeStart: c.rangeStart, rangeEnd: c.rangeEnd,
-        interval: n, key: key, delayedDays: eff.delayedDays, done: eff.done,
+        interval: n, key: eff.movedKey ?? key, delayedDays: eff.delayedDays, done: eff.done,
         entryId: c.entryId
       });
     });
@@ -228,7 +228,7 @@ function buildAllReviews(){
         rawVocabReviews.push({
           date: eff.date, originalDate,
           rangeStart: p.plannedStart, rangeEnd: p.actualEnd,
-          interval: n, key: key, entryId: resolvedEntryId,
+          interval: n, key: eff.movedKey ?? key, entryId: resolvedEntryId,
           delayedDays: eff.delayedDays, done: eff.done
         });
       });
@@ -264,7 +264,7 @@ function buildAllReviews(){
       const eff = computeEffectiveReviewDate(originalDate, key, reviewWeekdays);
       rawRefReviews.push({
         date: eff.date, originalDate, rangeStart: c.rangeStart, rangeEnd: c.rangeEnd,
-        interval: n, bookName: c.bookName, key: key, planId: c.planId,
+        interval: n, bookName: c.bookName, key: eff.movedKey ?? key, planId: c.planId,
         delayedDays: eff.delayedDays, done: eff.done
       });
     });
@@ -286,7 +286,7 @@ function buildAllReviews(){
           date: eff.date, originalDate,
           rangeStart: p.plannedStart, rangeEnd: p.actualEnd,
           interval: n, bookName: plan.bookName,
-          planId: resolvedPlanId, key: key,
+          planId: resolvedPlanId, key: eff.movedKey ?? key,
           delayedDays: eff.delayedDays, done: eff.done
         });
       });
@@ -400,7 +400,7 @@ function adjustReviewsForCarryForward(vocabReviews, refReviews, cfVocab, cfRef) 
       const eff = computeEffectiveReviewDate(originalDate, key, reviewWeekdays);
       filteredVocabReviews.push({
         date: eff.date, originalDate, rangeStart: c.rangeStart, rangeEnd: c.rangeEnd,
-        interval: n, key: key, delayedDays: eff.delayedDays, done: eff.done,
+        interval: n, key: eff.movedKey ?? key, delayedDays: eff.delayedDays, done: eff.done,
         entryId: c.entryId
       });
     });
@@ -416,7 +416,7 @@ function adjustReviewsForCarryForward(vocabReviews, refReviews, cfVocab, cfRef) 
       const eff = computeEffectiveReviewDate(originalDate, key, reviewWeekdays);
       filteredRefReviews.push({
         date: eff.date, originalDate, rangeStart: c.rangeStart, rangeEnd: c.rangeEnd,
-        interval: n, bookName: c.bookName, key: key, planId: c.planId,
+        interval: n, bookName: c.bookName, key: eff.movedKey ?? key, planId: c.planId,
         delayedDays: eff.delayedDays, done: eff.done
       });
     });
@@ -1926,6 +1926,7 @@ function handleProgressClear(dateStr) {
 
 function renderTodayNew(){
   const box = document.getElementById('todayNewBox');
+  if (!box) return;
   const todayIso = todayISO();
   const allChunks = entries.flatMap(computeChunksForEntry);
   const todayChunks = allChunks.filter(c => c.date === todayIso);
@@ -2293,6 +2294,7 @@ async function handleScoreAdd(){
   if(!subject){ errorEl.textContent = '教科を入力してください。'; return; }
   if(valueEl.value === '' || isNaN(score) || score < 0){ errorEl.textContent = '得点を正しく入力してください。'; return; }
   if(total <= 0){ errorEl.textContent = '満点は1以上で入力してください。'; return; }
+  if(score > total){ errorEl.textContent = '得点は満点以下で入力してください。'; return; }
   if(deviation !== null && (isNaN(deviation) || deviation < 0 || deviation > 100)){
     errorEl.textContent = '偏差値は0〜100の数値で入力してください（省略可）。'; return;
   }
@@ -2610,11 +2612,6 @@ function showTab(tabName) {
   buildWeekdayChips();
   buildWeekdayChips('reviewWeekdayRow', [0, 3, 6]);    // デフォルト：日・水・土
   buildIntervalChips();
-  document.querySelectorAll('input[name="planMode"]').forEach(radio => {
-    radio.addEventListener('change', (e) => {
-      document.getElementById('amountFieldWrap').style.display = e.target.value === 'byAmount' ? 'flex' : 'none';
-    });
-  });
   document.getElementById('startDate').value = todayISO();
   document.getElementById('addBtn').addEventListener('click', handleAdd);
   document.getElementById('resetBtn').addEventListener('click', handleReset);
@@ -2731,20 +2728,29 @@ function computeRefSchedule(plan){
 
 // ② データの保存と読み込み
 function saveRefEntries() {
-  localStorage.setItem(REF_STORAGE_KEY, JSON.stringify(refEntries));
+  try {
+    localStorage.setItem(REF_STORAGE_KEY, JSON.stringify(refEntries));
+  } catch (e) {
+    console.error('saveRefEntries: Storage error:', e);
+  }
 }
 function loadRefEntries() {
-  const saved = localStorage.getItem(REF_STORAGE_KEY);
-  if (saved) {
-    refEntries = JSON.parse(saved);
-    renderRefSchedule(); // 読み込み後すぐに描画
+  try {
+    const saved = localStorage.getItem(REF_STORAGE_KEY);
+    if (saved) {
+      refEntries = JSON.parse(saved);
+      renderRefSchedule(); // 読み込み後すぐに描画
 
-    // 既にスケジュールが登録されている場合：設定アコーディオンを初期状態で閉じる
-    // （「今日の確認」エリアを最初に見せることでUXを改善）
-    if (refEntries.length > 0) {
-      const settingDetails = document.getElementById('refSettingDetails');
-      if (settingDetails) settingDetails.open = false;
+      // 既にスケジュールが登録されている場合：設定アコーディオンを初期状態で閉じる
+      // （「今日の確認」エリアを最初に見せることでUXを改善）
+      if (refEntries.length > 0) {
+        const settingDetails = document.getElementById('refSettingDetails');
+        if (settingDetails) settingDetails.open = false;
+      }
     }
+  } catch (e) {
+    console.error('loadRefEntries: Storage error:', e);
+    refEntries = [];
   }
 }
 
