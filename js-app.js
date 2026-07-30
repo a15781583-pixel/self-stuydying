@@ -140,7 +140,17 @@ function saveReviewDone(){
 // 移動先の日付をキーに埋め込んだ movedKey を返すことで、移動のたびにチェック状態がリセットされる。
 // 予定日が来ていない、またはすでにクリア済みの項目はずらさない。
 function computeEffectiveReviewDate(originalIso, key, reviewWeekdays){
-  if(reviewDoneSet.has(key)){
+  // 【バグ2修正】進捗パネル(dailyProgress)に完了記録があるかチェック
+  // reviewDoneSet はカレンダーのチェックボックス経由でのみ更新されるため、
+  // パネルから完了させた場合に done: true にならないケースに対応する。
+  const isDoneInPanel = dailyProgress.some(p =>
+    (p.type === 'word-review' || p.type === 'book-review') &&
+    p.reviewKey === key &&
+    !p.notProgressed &&
+    p.actualEnd >= p.plannedEnd
+  );
+
+  if(reviewDoneSet.has(key) || isDoneInPanel){
     return { date: originalIso, delayedDays: 0, done: true };
   }
   const todayIso  = todayISO();
@@ -185,7 +195,8 @@ function buildAllReviews(){
       return p.date === c.date && p.entryId === c.entryId;
     });
     // 進捗入力済みの計画からは当初の復習を作らない
-    if (hasProgressRecord) return;
+    // 繰り越しチャンク（isFromProgress:true）は日付キーが元予定日と食い違うため先にスキップ
+    if (c.isFromProgress || hasProgressRecord) return;
 
     (c.intervals || []).forEach(n => {
       const originalDate = formatISO(addDays(parseISO(c.date), n));
@@ -209,7 +220,7 @@ function buildAllReviews(){
       const entry = entries.find(e => e.id === resolvedEntryId);
       if (!entry) return;
       const reviewWeekdays = entry.reviewWeekdays || [];
-      DEFAULT_INTERVALS.forEach(n => {
+      (entry.intervals || DEFAULT_INTERVALS).forEach(n => {
         const originalDate = findNextReviewWeekday(p.date, n, reviewWeekdays);
         // 進捗日付と範囲を含めた一意のキーを生成
         const key = `w_prog_${resolvedEntryId}_${p.date}_${p.plannedStart}_${p.actualEnd}_${n}`;
@@ -242,7 +253,8 @@ function buildAllReviews(){
       return p.date === c.date && (p.planId || p.entryId) === c.planId;
     });
     // 進捗入力済みの計画からは当初の復習を作らない
-    if (hasProgressRecord) return;
+    // 繰り越しチャンク（isFromProgress:true）は日付キーが元予定日と食い違うため先にスキップ
+    if (c.isFromProgress || hasProgressRecord) return;
 
     DEFAULT_INTERVALS.forEach(n => {
       const originalDate = formatISO(addDays(parseISO(c.date), n));
@@ -324,33 +336,33 @@ function getCarryForwardChunks(vocabChunks, refChunks) {
     })
     .map(chunk => ({ ...chunk, date: todayStr, carriedForward: true, originalDate: chunk.date }));
 
-    const cfRef = refChunks
-        .filter(chunk => chunk.date < todayStr)
-        .filter(chunk => {
-          const latest = getLatestProgress(chunk.planId, 'book');
-          if (latest && latest.actualEnd >= chunk.rangeEnd) return false;
-          
-          // 変更点: 複合キー（chunkKey）を生成し、p.entryId と照合するロジックを追加
-          const chunkKey = `${chunk.planId}_${chunk.date}_${chunk.rangeStart}`;
-          const hasRecord = dailyProgress.some(p => {
-            if (p.type !== 'book') return false;
-            if (p.notProgressed) return false;
-            // 新形式（planId が entryId と異なる = entryId が複合キー）は完全一致のみ
-            if (p.planId && p.planId !== p.entryId) {
-              return p.entryId === chunkKey;
-            }
-            // 旧形式：日付とプランIDで照合
-            if (p.date === chunk.date) {
-              const resolvedPlanId = p.planId || p.entryId;
-              return resolvedPlanId === chunk.planId;
-            }
-            return false;
-          });
-          return !hasRecord;
-        })
-        .map(chunk => ({ ...chunk, date: todayStr, carriedForward: true, originalDate: chunk.date }));
+  const cfRef = refChunks
+    .filter(chunk => chunk.date < todayStr)
+    .filter(chunk => {
+      const latest = getLatestProgress(chunk.planId, 'book');
+      if (latest && latest.actualEnd >= chunk.rangeEnd) return false;
 
-    return { cfVocab, cfRef };
+      // 変更点: 複合キー（chunkKey）を生成し、p.entryId と照合するロジックを追加
+      const chunkKey = `${chunk.planId}_${chunk.date}_${chunk.rangeStart}`;
+      const hasRecord = dailyProgress.some(p => {
+        if (p.type !== 'book') return false;
+        if (p.notProgressed) return false;
+        // 新形式（planId が entryId と異なる = entryId が複合キー）は完全一致のみ
+        if (p.planId && p.planId !== p.entryId) {
+          return p.entryId === chunkKey;
+        }
+        // 旧形式：日付とプランIDで照合
+        if (p.date === chunk.date) {
+          const resolvedPlanId = p.planId || p.entryId;
+          return resolvedPlanId === chunk.planId;
+        }
+        return false;
+      });
+      return !hasRecord;
+    })
+    .map(chunk => ({ ...chunk, date: todayStr, carriedForward: true, originalDate: chunk.date }));
+
+  return { cfVocab, cfRef };
 }
 
 /**
@@ -388,7 +400,8 @@ function adjustReviewsForCarryForward(vocabReviews, refReviews, cfVocab, cfRef) 
       const eff = computeEffectiveReviewDate(originalDate, key, reviewWeekdays);
       filteredVocabReviews.push({
         date: eff.date, originalDate, rangeStart: c.rangeStart, rangeEnd: c.rangeEnd,
-        interval: n, key: key, delayedDays: eff.delayedDays, done: eff.done
+        interval: n, key: key, delayedDays: eff.delayedDays, done: eff.done,
+        entryId: c.entryId
       });
     });
   });
@@ -928,7 +941,8 @@ function renderIntegratedSchedule() {
   // ─────────────────────────────────────────────────────────────
 
   // 表示日数の決定 (1週間なら7日、1ヶ月なら30日)
-  const periodMode = document.querySelector('input[name="schedulePeriod"]:checked').value;
+  const checked = document.querySelector('input[name="schedulePeriod"]:checked');
+  const periodMode = checked ? checked.value : 'week';
   const targetDays = periodMode === 'week' ? 7 : 30;
 
   // 単語・参考書の新規チャンクと、復習日（繰り上げ時は自動調整済み）をまとめて取得
@@ -1012,27 +1026,29 @@ function renderIntegratedSchedule() {
       taskHtml = `<div style="color: #999; font-size: 0.85rem; margin-top: 4px;">予定なし</div>`;
     }
 
+    // 進捗入力UIの対象チャンクを i===0 のときのみ算出（HTML生成・イベント設定の両方で共用）
+    const dayWordsForProgress       = i === 0 ? allWordChunks.filter(c => c.date.startsWith(dateStr)) : null;
+    // 繰り越し分も含めた allBookChunks を使うことで、繰り越し参考書も進捗入力対象にする
+    const dayBooksForProgress       = i === 0 ? allBookChunks.filter(c => c.date.startsWith(dateStr)) : null;
+    // 未完了の復習タスクも進捗入力対象にする
+    const dayWordReviewsForProgress = i === 0 ? dayWordReviews.filter(r => !r.done) : null;
+    const dayBookReviewsForProgress = i === 0 ? dayBookReviews.filter(r => !r.done) : null;
+    const hasAnyTask = i === 0 && (
+      dayWordsForProgress.length > 0 || dayBooksForProgress.length > 0 ||
+      dayWordReviewsForProgress.length > 0 || dayBookReviewsForProgress.length > 0
+    );
+
     let progressSectionHtml = '';
-    if (i === 0) {
-      const dayWordsForProgress = allWordChunks.filter(c => c.date.startsWith(dateStr));
-      // 繰り越し分も含めた allBookChunks を使うことで、繰り越し参考書も進捗入力対象にする
-      const dayBooksForProgress = allBookChunks.filter(c => c.date.startsWith(dateStr));
-      // 未完了の復習タスクも進捗入力対象にする
-      const dayWordReviewsForProgress = dayWordReviews.filter(r => !r.done);
-      const dayBookReviewsForProgress = dayBookReviews.filter(r => !r.done);
-      const hasAnyTask = dayWordsForProgress.length > 0 || dayBooksForProgress.length > 0
-                      || dayWordReviewsForProgress.length > 0 || dayBookReviewsForProgress.length > 0;
-      if (hasAnyTask) {
-        const html = buildProgressInputSection(
-          dateStr,
-          dayWordsForProgress,
-          dayBooksForProgress,
-          dateStr,
-          dayWordReviewsForProgress,
-          dayBookReviewsForProgress
-        );
-        progressSectionHtml = html || '';
-      }
+    if (hasAnyTask) {
+      const html = buildProgressInputSection(
+        dateStr,
+        dayWordsForProgress,
+        dayBooksForProgress,
+        dateStr,
+        dayWordReviewsForProgress,
+        dayBookReviewsForProgress
+      );
+      progressSectionHtml = html || '';
     }
 
     const hasCFWords  = i === 0 && dayWords.some(w => w.carriedForward);
@@ -1053,15 +1069,8 @@ function renderIntegratedSchedule() {
       ${progressSectionHtml}
     `;
 
-    if (i === 0) {
-      const dayWordsForProgress = allWordChunks.filter(c => c.date.startsWith(dateStr));
-      const dayBooksForProgress = allBookChunks.filter(c => c.date.startsWith(dateStr));
-      const dayWordReviewsForProgress2 = dayWordReviews.filter(r => !r.done);
-      const dayBookReviewsForProgress2 = dayBookReviews.filter(r => !r.done);
-      if (dayWordsForProgress.length > 0 || dayBooksForProgress.length > 0
-          || dayWordReviewsForProgress2.length > 0 || dayBookReviewsForProgress2.length > 0) {
-        attachProgressInputHandlers(dayCard, dateStr);
-      }
+    if (hasAnyTask) {
+      attachProgressInputHandlers(dayCard, dateStr);
     }
 
     return dayCard;
@@ -1152,16 +1161,40 @@ function updateTodaySummaryCard() {
 
   // 全完了バナー
   if (allDoneEl) {
-    const allReviewsDone = totalReviews === 0 && hasAnyTask;
+    // 新規単語タスクの完了チェック：各チャンクに対して actualEnd >= rangeEnd の進捗記録が存在するか
+    const allWordsDone = todayWords.every(c => {
+      const chunkKey = `${c.entryId}_${c.date}_${c.rangeStart}`;
+      return dailyProgress.some(p => {
+        if (p.type !== 'word') return false;
+        // 新形式（originEntryId が存在する）は複合キーで完全一致のみ
+        const matched = p.originEntryId != null
+          ? p.entryId === chunkKey
+          : p.date === c.date && p.entryId === c.entryId;
+        return matched && p.actualEnd >= c.rangeEnd;
+      });
+    });
+    // 新規参考書タスクの完了チェック：各チャンクに対して actualEnd >= rangeEnd の進捗記録が存在するか
+    const allBooksDone = todayBooks.every(c => {
+      const chunkKey = `${c.planId}_${c.date}_${c.rangeStart}`;
+      return dailyProgress.some(p => {
+        if (p.type !== 'book') return false;
+        // 新形式（planId が entryId と異なる = entryId が複合キー）は完全一致のみ
+        const matched = (p.planId && p.planId !== p.entryId)
+          ? p.entryId === chunkKey
+          : p.date === c.date && (p.planId || p.entryId) === c.planId;
+        return matched && p.actualEnd >= c.rangeEnd;
+      });
+    });
+    // 新規タスクがある場合はすべて完了済みであること、ない場合はスルー
+    const allNewTasksDone = (todayWords.length === 0 || allWordsDone) &&
+                            (todayBooks.length === 0 || allBooksDone);
+    const allReviewsDone = totalReviews === 0 && hasAnyTask && allNewTasksDone;
     allDoneEl.style.display = allReviewsDone ? 'block' : 'none';
   }
 }
 
 /* ---------- 進捗入力 UI ---------- */
 
-/**
- * 今日の単語・参考書チャンクに対する進捗入力セクションのHTMLを返す
- */
 /**
  * 今日の単語・参考書チャンクに対する進捗入力セクションのHTMLを返す
  * @param {string} dateStr          - 対象日付 (YYYY-MM-DD)
@@ -1416,10 +1449,6 @@ function buildProgressInputSection(dateStr, dayWords, dayBooks, baseId, dayWordR
     </div>`;
 }
 
-/**
- * 進捗入力フィールドの値変化にリアルタイムで反応するイベントをアタッチ
- * @param {string} [baseId] - buildProgressInputSection に渡したものと同じベースID
- */
 /**
  * 進捗入力コントロール（ボタン＋ステッパー）のインタラクションをセットアップ
  */
@@ -1839,7 +1868,7 @@ function buildWordReviewPreviewHtml(dateStr, wordRecords) {
       diffHtml = `<div class="progressed-undershot">⚠️ ${Math.abs(diff)}個残りました。残りは以降のスケジュールに自動分散されました。</div>`;
     }
 
-    const slotsHtml = DEFAULT_INTERVALS.map(n => {
+    const slotsHtml = (entry.intervals || DEFAULT_INTERVALS).map(n => {
       const d = parseISO(formatISO(addDays(parseISO(dateStr), n)));
       const wdLabel  = ['日','月','火','水','木','金','土'][d.getDay()];
       const dispDate = `${d.getMonth()+1}/${d.getDate()}（${wdLabel}）`;
@@ -1881,6 +1910,13 @@ function buildWordReviewPreviewHtml(dateStr, wordRecords) {
  */
 function handleProgressClear(dateStr) {
   if (!confirm(`${dateStr} の進捗記録をリセットしますか？\nスケジュールが元の計画に戻ります。`)) return;
+  // dailyProgress を削除する前に、対象日の復習キーを reviewDoneSet から除去
+  const reviewKeysToRemove = dailyProgress
+    .filter(p => p.date === dateStr && (p.type === 'word-review' || p.type === 'book-review') && p.reviewKey)
+    .map(p => p.reviewKey);
+  reviewKeysToRemove.forEach(k => reviewDoneSet.delete(k));
+  saveReviewDone();  // ← 追加
+
   dailyProgress = dailyProgress.filter(p => p.date !== dateStr);
   saveDailyProgress();
   renderIntegratedSchedule();
@@ -2091,10 +2127,10 @@ function renderLeech(){
       return `
         <div class="due-item" data-id="${w.id}">
           <div class="word-row">
-            <div><span class="word">${w.word}</span>${overdue ? '<span class="overdue">期限超過</span>' : ''}${warn}</div>
+            <div><span class="word">${escapeHtml(w.word)}</span>${overdue ? '<span class="overdue">期限超過</span>' : ''}${warn}</div>
             <button class="reveal-btn" data-action="reveal" data-id="${w.id}">意味を確認</button>
           </div>
-          <div class="meaning-text" data-role="meaning" data-id="${w.id}">${w.meaning || '（メモ未登録：口頭で確認）'}</div>
+          <div class="meaning-text" data-role="meaning" data-id="${w.id}">${escapeHtml(w.meaning) || '（メモ未登録：口頭で確認）'}</div>
           <div class="word-actions" data-role="actions" data-id="${w.id}">
             <button class="btn-correct" data-action="correct" data-id="${w.id}">できた</button>
             <button class="btn-wrong" data-action="wrong" data-id="${w.id}">もう一度</button>
@@ -2128,8 +2164,8 @@ function renderLeech(){
       ${activeSorted.map(w => `
       <tr>
        <td>
-        ${w.word}
-        <button onclick="speakWord(${JSON.stringify(w.word)})" style="background:none; border:none; cursor:pointer; font-size:1rem; margin-left:6px;">🔊</button>
+        ${escapeHtml(w.word)}
+        <button class="speak-btn" data-word="${escapeHtml(w.word)}" style="background:none; border:none; cursor:pointer; font-size:1rem; margin-left:6px;">🔊</button>
         ${w.missCount >= LEECH_WARN_THRESHOLD ? '<span class="badge-warn">要注意</span>' : ''}
        </td>
        <td>${w.nextReviewDate}</td>
@@ -2137,6 +2173,9 @@ function renderLeech(){
        <td><button class="mini-del" data-id="${w.id}">削除</button></td>
       </tr>`).join('')}
     `;
+    activeTable.querySelectorAll('.speak-btn').forEach(btn => {
+      btn.addEventListener('click', () => speakWord(btn.dataset.word));
+    });
     activeTable.querySelectorAll('.mini-del').forEach(btn => {
       btn.addEventListener('click', () => handleLeechDelete(btn.dataset.id));
     });
@@ -2151,7 +2190,7 @@ function renderLeech(){
       <tr><th>単語</th><th>卒業日</th><th></th></tr>
       ${graduated.map(w => `
         <tr>
-          <td>${w.word}</td>
+          <td>${escapeHtml(w.word)}</td>
           <td>${w.gradDate || '-'}</td>
           <td><button class="mini-del" data-id="${w.id}">削除</button></td>
         </tr>`).join('')}
@@ -2483,7 +2522,9 @@ function finishTest() {
   resultArea.style.display = 'block';
   
   const correctCount = testSessionResults.filter(r => r.correct).length;
-  const rate = Math.round((correctCount / testQueue.length) * 100);
+  const rate = testQueue.length > 0
+    ? Math.round((correctCount / testQueue.length) * 100)
+    : 0;
   document.getElementById('resultScore').textContent = `正答率: ${correctCount} / ${testQueue.length} (${rate}%)`;
   
   const listHtml = testSessionResults.map(r => `
@@ -2585,6 +2626,7 @@ function showTab(tabName) {
   loadDailyProgress(); // 日別進捗データを読み込む
   await loadEntries();
   renderAll();
+  loadRefEntries(); // 参考書データを先に読み込む（DOMContentLoadedから移動）
   renderIntegratedSchedule(); // 「スケジュール」タブは初期表示タブなので、読み込み直後に描画する
   updateTodaySummaryCard();   // 今日のサマリーカードを初期表示
   await loadLeech();
@@ -2631,8 +2673,7 @@ window.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  loadRefEntries();
-  renderIntegratedSchedule(); // 参考書データの読み込み後にも「スケジュール」タブを最新化する
+  // loadRefEntries() / renderIntegratedSchedule() は init() 内で一元化済みのため削除
   renderRefTodayCard();       // 参考書「今日やること」カードを初期描画
 });
 
@@ -2681,7 +2722,7 @@ function computeRefSchedule(plan){
       if (count <= 0) return;
       const rangeStart = numCursor;
       const rangeEnd = numCursor + count - 1;
-      chunks.push({ date: formatISO(d), rangeStart, rangeEnd });
+      chunks.push({ date: formatISO(d), rangeStart, rangeEnd, intervals: plan.intervals || [] });
       numCursor = rangeEnd + 1;
     });
   }
