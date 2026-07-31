@@ -143,9 +143,12 @@ function computeEffectiveReviewDate(originalIso, key, reviewWeekdays){
   // 【バグ2修正】進捗パネル(dailyProgress)に完了記録があるかチェック
   // reviewDoneSet はカレンダーのチェックボックス経由でのみ更新されるため、
   // パネルから完了させた場合に done: true にならないケースに対応する。
+  // ★ movedKey 対応：dailyProgress には movedKey（例: key_moved_YYYY-MM-DD）が
+  //    保存されるため、originalKey との完全一致だけでなく
+  //    p.reviewKey.replace(/_moved_.*/, '') === key でも照合する。
   const isDoneInPanel = dailyProgress.some(p =>
     (p.type === 'word-review' || p.type === 'book-review') &&
-    p.reviewKey === key &&
+    (p.reviewKey === key || p.reviewKey.replace(/_moved_.*/, '') === key) &&
     !p.notProgressed &&
     p.actualEnd >= p.plannedEnd
   );
@@ -451,7 +454,11 @@ function attachReviewCheckHandlers(container){
   container.querySelectorAll('.review-check').forEach(cb => {
     cb.addEventListener('change', () => {
       const key = cb.dataset.key;
-      if(cb.checked){ reviewDoneSet.add(key); } else { reviewDoneSet.delete(key); }
+      // 【Bug 1 修正】期限超過で日付移動した復習項目のキーは movedKey（例: `originalKey_moved_YYYY-MM-DD`）になっている。
+      // computeEffectiveReviewDate は originalKey（サフィックスなし）で reviewDoneSet を照合するため、
+      // ここで _moved_YYYY-MM-DD サフィックスを除去した originalKey をセットに保存することでミスマッチを解消する。
+      const originalKey = key.replace(/_moved_\d{4}-\d{2}-\d{2}$/, '');
+      if(cb.checked){ reviewDoneSet.add(originalKey); } else { reviewDoneSet.delete(originalKey); }
       saveReviewDone();
       refreshAllSchedules();
       renderIntegratedSchedule();
@@ -612,7 +619,7 @@ function computeAdjustedSchedule(materialType, material) {
     let searchFrom = todayStr;
     let safety = 0;
     while (cursor <= remainingEnd && safety++ < 3650) {
-      const nextDate = findNextStudyDay(searchFrom, material.weekdays);
+      const nextDate = findNextStudyDay(searchFrom, material.weekdays || []); // undefined ガード：空配列時は findNextStudyDay のフォールバック（翌日）を使用
       const count = Math.min(amountPerDay, remainingEnd - cursor + 1);
       newChunks.push({
         date: nextDate,
@@ -933,6 +940,7 @@ function renderSchedule(){
 
 function renderIntegratedSchedule() {
   const container = document.getElementById('integratedScheduleList');
+  if (!container) return;
   const wasFutureOpen = document.getElementById('integratedScheduleFuture')?.open;
   container.innerHTML = '';
 
@@ -1196,15 +1204,6 @@ function updateTodaySummaryCard() {
 /* ---------- 進捗入力 UI ---------- */
 
 /**
- * 今日の単語・参考書チャンクに対する進捗入力セクションのHTMLを返す
- * @param {string} dateStr          - 対象日付 (YYYY-MM-DD)
- * @param {Array}  dayWords         - 当日の単語チャンク（新規）
- * @param {Array}  dayBooks         - 当日の参考書チャンク（新規・繰り越し含む）
- * @param {string} [baseId]         - IDプレフィックス（省略時は dateStr）
- * @param {Array}  [dayWordReviews] - 当日の単語復習タスク
- * @param {Array}  [dayBookReviews] - 当日の参考書復習タスク
- */
-/**
  * 進捗入力コントロール（ボタン＋ステッパー方式）のHTMLを返すヘルパー
  * @param {number} rangeStart  - 計画開始番号/ページ
  * @param {number} rangeEnd    - 計画終了番号/ページ
@@ -1290,6 +1289,15 @@ function buildProgControlHtml(rangeStart, rangeEnd, recordedVal, type, statusHtm
     </div>`;
 }
 
+/**
+ * 今日の単語・参考書チャンクに対する進捗入力セクションのHTMLを返す
+ * @param {string} dateStr          - 対象日付 (YYYY-MM-DD)
+ * @param {Array}  dayWords         - 当日の単語チャンク（新規）
+ * @param {Array}  dayBooks         - 当日の参考書チャンク（新規・繰り越し含む）
+ * @param {string} [baseId]         - IDプレフィックス（省略時は dateStr）
+ * @param {Array}  [dayWordReviews] - 当日の単語復習タスク
+ * @param {Array}  [dayBookReviews] - 当日の参考書復習タスク
+ */
 function buildProgressInputSection(dateStr, dayWords, dayBooks, baseId, dayWordReviews, dayBookReviews) {
   baseId = baseId || dateStr;
   dayWordReviews = dayWordReviews || [];
@@ -1740,7 +1748,7 @@ function handleProgressSave(dateStr, baseId) {
         p => !(p.date === dateStr && p.reviewKey === reviewKey && p.type === type)
       );
       const record = {
-        id: 'dp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5),
+        id: 'dp_' + crypto.randomUUID(),
         date: dateStr,
         reviewKey,
         type,
@@ -1773,7 +1781,7 @@ function handleProgressSave(dateStr, baseId) {
         p => !(p.date === dateStr && p.entryId === entryId && p.type === type)
       );
       const record = {
-        id: 'dp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5),
+        id: 'dp_' + crypto.randomUUID(),
         date: dateStr,
         entryId,
         originEntryId: type === 'word' ? originEntryId : undefined, // ★ word: 元の entry.id を別途保存
