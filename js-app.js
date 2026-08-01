@@ -148,7 +148,7 @@ function computeEffectiveReviewDate(originalIso, key, reviewWeekdays){
   //    p.reviewKey.replace(/_moved_.*/, '') === key でも照合する。
   const isDoneInPanel = dailyProgress.some(p =>
     (p.type === 'word-review' || p.type === 'book-review') &&
-    (p.reviewKey === key || p.reviewKey.replace(/_moved_.*/, '') === key) &&
+    p.reviewKey != null && (p.reviewKey === key || p.reviewKey.replace(/_moved_.*/, '') === key) &&
     !p.notProgressed &&
     p.actualEnd >= p.plannedEnd
   );
@@ -378,7 +378,8 @@ function isReviewFromOriginalSchedule(review, cfChunk, type) {
   const expectedKey = buildReviewKey(prefix, ownerId, cfChunk.rangeStart, cfChunk.rangeEnd, review.interval);
   
   // 変更点: 完全一致だけでなく、移動済みのキー(_moved_)も判定に含める
-  if (review.key !== expectedKey) return false;
+  const reviewBaseKey = review.key.replace(/_moved_.*/, '');
+  if (reviewBaseKey !== expectedKey) return false;
   
   const expectedOriginal = formatISO(addDays(parseISO(cfChunk.originalDate), review.interval));
   return review.originalDate === expectedOriginal;
@@ -1763,7 +1764,7 @@ function handleProgressSave(dateStr, baseId) {
       // val が plannedEnd に達していれば完了済みとしてセットに追加し、
       // 未達の場合（途中・進捗なし含む）は削除してカレンダーに残すようにする。
       if (val >= plannedEnd) {
-        reviewDoneSet.add(reviewKey);
+        reviewDoneSet.add(reviewKey.replace(/_moved_.*/, ''));
       } else {
         reviewDoneSet.delete(reviewKey);
       }
@@ -1922,7 +1923,10 @@ function handleProgressClear(dateStr) {
   const reviewKeysToRemove = dailyProgress
     .filter(p => p.date === dateStr && (p.type === 'word-review' || p.type === 'book-review') && p.reviewKey)
     .map(p => p.reviewKey);
-  reviewKeysToRemove.forEach(k => reviewDoneSet.delete(k));
+  reviewKeysToRemove.forEach(k => {
+    reviewDoneSet.delete(k);
+    reviewDoneSet.delete(k.replace(/_moved_.*/, '')); // 追加: originalKey も削除
+  });
   saveReviewDone();  // ← 追加
 
   dailyProgress = dailyProgress.filter(p => p.date !== dateStr);
