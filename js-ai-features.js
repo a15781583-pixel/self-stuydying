@@ -38,7 +38,7 @@ function initAiFeatures() {
   const runAnalysisBtn = document.getElementById('runAnalysisBtn');
 
   if (chatSendBtn) chatSendBtn.addEventListener('click', handleChatSend);
-  if (chatInput) chatInput.addEventListener('keypress', (e) => { if(e.key === 'Enter') handleChatSend(); });
+  if (chatInput) chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing && !e.shiftKey) handleChatSend(); });
   if (chatStopBtn) chatStopBtn.addEventListener('click', () => { if (abortController) abortController.abort(); });
   if (generatePlanBtn) generatePlanBtn.addEventListener('click', generateFinalPlan);
   if (scoreFileInput) scoreFileInput.addEventListener('change', handleScoreImageFile);
@@ -202,6 +202,7 @@ async function handleChatSend() {
     if (!response.ok) throw new Error(`APIエラー (Status: ${response.status})`);
 
     const data = await response.json();
+    if (!data.candidates?.length) throw new Error('APIからの応答が空です');
     const aiResponseText = data.candidates[0].content.parts[0].text;
 
     appendMessage(aiResponseText, false);
@@ -213,10 +214,14 @@ async function handleChatSend() {
     }
   } finally {
     abortController = null;
-    document.getElementById('chatSendBtn').style.display = 'inline-block';
-    document.getElementById('chatStopBtn').style.display = 'none';
-    chatInput.disabled = false;
-    chatInput.focus();
+    const sendBtn = document.getElementById('chatSendBtn');
+    const stopBtn = document.getElementById('chatStopBtn');
+    if (sendBtn) sendBtn.style.display = 'inline-block';
+    if (stopBtn) stopBtn.style.display = 'none';
+    if (chatInput) {
+      chatInput.disabled = false;
+      chatInput.focus();
+    }
   }
 }
 
@@ -235,8 +240,12 @@ async function generateFinalPlan() {
       body: JSON.stringify({ contents: [...chatHistory, { role: 'user', parts: [{ text: "これまでの対話履歴をすべて分析し、学習ロードマップを作成してください。" }] }] })
     });
     const data = await response.json();
+    if (!data.candidates?.length) throw new Error('APIからの応答が空です');
     let text = data.candidates[0].content.parts[0].text;
-    document.getElementById('coachOutput').innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(text) : text;
+    const sanitized = typeof DOMPurify !== 'undefined'
+      ? DOMPurify.sanitize(text.replace(/\n/g, '<br>'))
+      : text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+    document.getElementById('coachOutput').innerHTML = sanitized;
   } catch (e) {
     document.getElementById('coachOutput').innerHTML = 'エラーが発生しました。';
   } finally {
@@ -315,6 +324,7 @@ async function runWeaknessAnalysis() {
     });
     if (!response.ok) throw new Error(`APIエラー (Status: ${response.status})`);
     const data = await response.json();
+    if (!data.candidates?.length) throw new Error('APIからの応答が空です');
     const result = data.candidates[0].content.parts[0].text;
     try {
       // ANALYSIS_KEY はjs-app.jsのグローバル定数 'vocab-weakness-analysis'
