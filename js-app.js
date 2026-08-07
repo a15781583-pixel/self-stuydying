@@ -153,7 +153,7 @@ function computeEffectiveReviewDate(originalIso, key, reviewWeekdays){
   //    p.reviewKey.replace(/_moved_.*/, '') === key でも照合する。
   const isDoneInPanel = dailyProgress.some(p =>
     (p.type === 'word-review' || p.type === 'book-review') &&
-    p.reviewKey != null && (p.reviewKey === key || p.reviewKey.replace(/_moved_.*/, '') === key) &&
+    p.reviewKey != null && (p.reviewKey === key || p.reviewKey.replace(/_moved_\d{4}-\d{2}-\d{2}$/, '') === key) &&
     !p.notProgressed &&
     p.actualEnd >= p.plannedEnd
   );
@@ -382,7 +382,7 @@ function isReviewFromOriginalSchedule(review, cfChunk, type) {
   const expectedKey = buildReviewKey(prefix, ownerId, cfChunk.rangeStart, cfChunk.rangeEnd, review.interval);
   
   // 変更点: 完全一致だけでなく、移動済みのキー(_moved_)も判定に含める
-  const reviewBaseKey = review.key.replace(/_moved_.*/, '');
+  const reviewBaseKey = review.key.replace(/_moved_\d{4}-\d{2}-\d{2}$/, '');
   if (reviewBaseKey !== expectedKey) return false;
   
   const expectedOriginal = formatISO(addDays(parseISO(cfChunk.originalDate), review.interval));
@@ -1729,9 +1729,9 @@ function handleProgressSave(dateStr, baseId) {
       // val が plannedEnd に達していれば完了済みとしてセットに追加し、
       // 未達の場合（途中・進捗なし含む）は削除してカレンダーに残すようにする。
       if (val >= plannedEnd) {
-        reviewDoneSet.add(reviewKey.replace(/_moved_.*/, ''));
+        reviewDoneSet.add(reviewKey.replace(/_moved_\d{4}-\d{2}-\d{2}$/, ''));
       } else {
-        reviewDoneSet.delete(reviewKey.replace(/_moved_.*/, '')); // originalKey を削除
+        reviewDoneSet.delete(reviewKey.replace(/_moved_\d{4}-\d{2}-\d{2}$/, '')); // originalKey を削除
       }
       savedRecords.push(record);
       saved++;
@@ -1743,6 +1743,30 @@ function handleProgressSave(dateStr, baseId) {
       // book タイプは planId（参考書プランID）も別途保持する
       // entryId は「planId_originalDate_rangeStart」の複合キーなので refEntries への紐付けに planId を使う
       const planId = input.dataset.planId || entryId;
+      // ── Bug 1 修正：保存前に旧キーを reviewDoneSet から除去 ──
+      // actualEnd が変わって再保存された場合、旧キー（例: w_prog_E1_D1_1_50_1）が
+      // reviewDoneSet に残留し、クリア後の再保存時に復習タスクが「完了済み」と
+      // 誤判定されるバグを防ぐ。handleProgressClear の ② と同じロジックを適用する。
+      dailyProgress
+        .filter(p => p.date === dateStr && p.entryId === entryId && p.type === type && !p.notProgressed)
+        .forEach(p => {
+          const prefix   = type === 'word' ? 'w' : 'r';
+          const resolved = type === 'word'
+            ? (p.originEntryId || p.entryId)
+            : (p.planId || p.entryId);
+          const entity = type === 'word'
+            ? entries.find(e => e.id === resolved)
+            : refEntries.find(r => r.id === resolved);
+          if (!entity) return;
+          const intervals = type === 'book'
+            ? DEFAULT_INTERVALS
+            : ((entity && entity.intervals) ? entity.intervals : DEFAULT_INTERVALS);
+          intervals.forEach(n => {
+            const key = `${prefix}_prog_${resolved}_${p.date}_${p.plannedStart}_${p.actualEnd}_${n}`;
+            reviewDoneSet.delete(key);
+            reviewDoneSet.delete(key.replace(/_moved_\d{4}-\d{2}-\d{2}$/, '')); // movedKey 派生も念のため削除
+          });
+        });
       dailyProgress = dailyProgress.filter(
         p => !(p.date === dateStr && p.entryId === entryId && p.type === type)
       );
@@ -1890,7 +1914,7 @@ function handleProgressClear(dateStr) {
     .map(p => p.reviewKey);
   reviewKeysToRemove.forEach(k => {
     reviewDoneSet.delete(k);
-    reviewDoneSet.delete(k.replace(/_moved_.*/, '')); // 追加: originalKey も削除
+    reviewDoneSet.delete(k.replace(/_moved_\d{4}-\d{2}-\d{2}$/, '')); // 追加: originalKey も削除
   });
 
   // ② word/book 型の進捗記録から buildProgressReviews() で生成されるレビューキーも除去する。
@@ -1913,7 +1937,7 @@ function handleProgressClear(dateStr) {
       intervals.forEach(n => {
         const key = `${prefix}_prog_${resolved}_${p.date}_${p.plannedStart}_${p.actualEnd}_${n}`;
         reviewDoneSet.delete(key);
-        reviewDoneSet.delete(key.replace(/_moved_.*/, '')); // movedKey 派生も念のため削除
+        reviewDoneSet.delete(key.replace(/_moved_\d{4}-\d{2}-\d{2}$/, '')); // movedKey 派生も念のため削除
       });
     });
 
@@ -2638,8 +2662,9 @@ window.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // loadRefEntries() / renderIntegratedSchedule() は init() 内で一元化済みのため削除
-  renderRefTodayCard();       // 参考書「今日やること」カードを初期描画
+  // loadRefEntries() / renderIntegratedSchedule() / renderRefTodayCard() は
+  // init() → loadRefEntries() → renderRefSchedule() → renderRefTodayCard() の
+  // ルートで既にカバーされているため、ここでの呼び出しは不要（二重実行・競合防止）
 });
 
 // ①-2 参考書スケジュールの計算（単語スケジュールのcomputeChunksForEntryと同じ考え方）
