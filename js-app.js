@@ -570,7 +570,10 @@ function computeAdjustedSchedule(materialType, material) {
   const futureChunks = originalChunks.filter(c => c.date > todayStr);
 
   const remainingStart = latest.actualEnd + 1;
-  const remainingEnd   = material.endNum;
+  // BUGFIX③: endNum が undefined/null の場合（古いデータ等）は 0 をガード値として使用し、
+  //           NaN が後続処理（remaining 計算・while ループ）へ伝播するのを防ぐ。
+  //           remainingEnd=0 のとき remaining<=0 が確実に true になり pastChunks を返す。
+  const remainingEnd   = material.endNum ?? 0;
   const remaining      = remainingEnd - remainingStart + 1;
 
   if (remaining <= 0) return pastChunks; // 全完了
@@ -1954,7 +1957,7 @@ function renderTodayNew(){
   const box = document.getElementById('todayNewBox');
   if (!box) return;
   const todayIso = todayISO();
-  const allChunks = entries.flatMap(computeAdjustedChunksForEntry);
+  const { vocabChunks: allChunks } = buildScheduleData();
   const todayChunks = allChunks.filter(c => c.date === todayIso);
   if(todayChunks.length === 0){
     box.innerHTML = `<div class="empty-mini">今日の新規範囲はありません。</div>`;
@@ -2610,6 +2613,24 @@ function showTab(tabName) {
   document.getElementById('leechAddBtn').addEventListener('click', handleLeechAdd);
   document.getElementById('printBtn').addEventListener('click', () => window.print());
 
+  // 【追加】ラジオボタンで入力欄を切り替えるイベント
+  document.querySelectorAll('input[name="planMode"]').forEach(radio => {
+    radio.addEventListener('change', (e) => {
+      if (e.target.value === 'byAmount') {
+        document.getElementById('amountFieldWrap').style.display = ''; 
+        document.getElementById('endDateWrap').style.display = 'none';
+      } else {
+        document.getElementById('amountFieldWrap').style.display = 'none';
+        document.getElementById('endDateWrap').style.display = '';
+      }
+    });
+  });
+
+  // 期間ラジオボタンが切り替わったら再描画
+  document.querySelectorAll('input[name="schedulePeriod"]').forEach(radio => {
+    radio.addEventListener('change', renderIntegratedSchedule);
+  });
+
   // setupApiKeyPersistence / loadSavedApiKey はjs-ai-features.jsのinitAiFeatures()が担当
   loadReviewDone();
   loadDailyProgress(); // 日別進捗データを読み込む
@@ -2820,21 +2841,3 @@ function renderRefSchedule() {
   refreshAllSchedules();
   renderRefTodayCard();
 }
-
-// 【追加】ラジオボタンで入力欄を切り替えるイベント
-document.querySelectorAll('input[name="planMode"]').forEach(radio => {
-  radio.addEventListener('change', (e) => {
-    if (e.target.value === 'byAmount') {
-      document.getElementById('amountFieldWrap').style.display = ''; 
-      document.getElementById('endDateWrap').style.display = 'none';
-    } else {
-      document.getElementById('amountFieldWrap').style.display = 'none';
-      document.getElementById('endDateWrap').style.display = '';
-    }
-  });
-});
-
-// 期間ラジオボタンが切り替わったら再描画
-document.querySelectorAll('input[name="schedulePeriod"]').forEach(radio => {
-  radio.addEventListener('change', renderIntegratedSchedule);
-});
