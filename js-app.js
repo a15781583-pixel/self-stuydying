@@ -151,9 +151,15 @@ function computeEffectiveReviewDate(originalIso, key, reviewWeekdays){
   // ★ movedKey 対応：dailyProgress には movedKey（例: key_moved_YYYY-MM-DD）が
   //    保存されるため、originalKey との完全一致だけでなく
   //    p.reviewKey.replace(/_moved_.*/, '') === key でも照合する。
+  // ★【バグ3修正】p.date <= originalIso フィルターを追加。
+  //    moved 完了後の残存レコード（p.date > originalIso）が、同一 base key を持つ
+  //    別サイクルの復習を誤って「完了済み」と判定するのを防ぐ。
+  //    moved 完了は line 1735 の reviewDoneSet.add(baseKey) で確実に記録されるため、
+  //    isDoneInPanel は originalIso 以前のレコードのみ対象とすれば十分。
   const isDoneInPanel = dailyProgress.some(p =>
     (p.type === 'word-review' || p.type === 'book-review') &&
     p.reviewKey != null && (p.reviewKey === key || p.reviewKey.replace(/_moved_\d{4}-\d{2}-\d{2}$/, '') === key) &&
+    p.date <= originalIso &&
     !p.notProgressed &&
     p.actualEnd >= p.plannedEnd
   );
@@ -219,7 +225,7 @@ function buildProgressReviews(progressItems, prefix, getResolved, getEntity, get
     const reviewWeekdays = entity.reviewWeekdays || [];
     (getIntervals(entity) || []).forEach(n => {
       const originalDate = findNextReviewWeekday(p.date, n, reviewWeekdays);
-      const key = `${prefix}_prog_${resolved}_${p.date}_${p.plannedStart}_${p.actualEnd}_${n}`;
+      const key = `${prefix}_prog_${resolved}_${p.date}_${p.plannedStart}_${n}`;
       const eff = computeEffectiveReviewDate(originalDate, key, reviewWeekdays);
       raw.push({
         date: eff.date, originalDate, rangeStart: p.plannedStart, rangeEnd: p.actualEnd,
@@ -1747,9 +1753,9 @@ function handleProgressSave(dateStr, baseId) {
       // entryId は「planId_originalDate_rangeStart」の複合キーなので refEntries への紐付けに planId を使う
       const planId = input.dataset.planId || entryId;
       // ── Bug 1 修正：保存前に旧キーを reviewDoneSet から除去 ──
-      // actualEnd が変わって再保存された場合、旧キー（例: w_prog_E1_D1_1_50_1）が
-      // reviewDoneSet に残留し、クリア後の再保存時に復習タスクが「完了済み」と
-      // 誤判定されるバグを防ぐ。handleProgressClear の ② と同じロジックを適用する。
+      // 再保存前に旧キーを reviewDoneSet から除去する。
+      // キー形式: `${prefix}_prog_${resolved}_${p.date}_${p.plannedStart}_${n}` (actualEnd はキーに含めない)
+      // handleProgressClear の ② と同じロジックを適用する。
       dailyProgress
         .filter(p => p.date === dateStr && p.entryId === entryId && p.type === type && !p.notProgressed)
         .forEach(p => {
@@ -1765,7 +1771,7 @@ function handleProgressSave(dateStr, baseId) {
             ? DEFAULT_INTERVALS
             : ((entity && entity.intervals) ? entity.intervals : DEFAULT_INTERVALS);
           intervals.forEach(n => {
-            const key = `${prefix}_prog_${resolved}_${p.date}_${p.plannedStart}_${p.actualEnd}_${n}`;
+            const key = `${prefix}_prog_${resolved}_${p.date}_${p.plannedStart}_${n}`;
             reviewDoneSet.delete(key);
             reviewDoneSet.delete(key.replace(/_moved_\d{4}-\d{2}-\d{2}$/, '')); // movedKey 派生も念のため削除
           });
@@ -1923,7 +1929,7 @@ function handleProgressClear(dateStr) {
   // ② word/book 型の進捗記録から buildProgressReviews() で生成されるレビューキーも除去する。
   // カレンダーのチェックボックスで reviewDoneSet に追加されたキーが、クリア後の再記録時に
   // 「完了済み」と誤認されるのを防ぐための修正。
-  // キー形式: `${prefix}_prog_${resolved}_${p.date}_${p.plannedStart}_${p.actualEnd}_${n}`
+  // キー形式: `${prefix}_prog_${resolved}_${p.date}_${p.plannedStart}_${n}` (actualEnd はキーに含めない)
   dailyProgress
     .filter(p => p.date === dateStr && (p.type === 'word' || p.type === 'book') && !p.notProgressed)
     .forEach(p => {
@@ -1938,7 +1944,7 @@ function handleProgressClear(dateStr) {
         ? DEFAULT_INTERVALS
         : ((entity && entity.intervals) ? entity.intervals : DEFAULT_INTERVALS);
       intervals.forEach(n => {
-        const key = `${prefix}_prog_${resolved}_${p.date}_${p.plannedStart}_${p.actualEnd}_${n}`;
+        const key = `${prefix}_prog_${resolved}_${p.date}_${p.plannedStart}_${n}`;
         reviewDoneSet.delete(key);
         reviewDoneSet.delete(key.replace(/_moved_\d{4}-\d{2}-\d{2}$/, '')); // movedKey 派生も念のため削除
       });
@@ -2110,6 +2116,7 @@ async function handleLeechCorrect(id){
   if(newStep >= DEFAULT_INTERVALS.length){
     entry.status = 'graduated';
     entry.gradDate = todayISO();
+    entry.stepIndex = newStep;
   }else{
     entry.stepIndex = newStep;
     entry.nextReviewDate = nextDateForStep(newStep);
