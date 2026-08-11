@@ -25,6 +25,7 @@ function injectAiNavButtons() {
 
 // AI機能の初期化・イベントリスナー登録
 function initAiFeatures() {
+  injectAiNavButtons(); // ① AIタブボタンをナビゲーションバーへ挿入
   loadSavedApiKey();
   setupApiKeyPersistence();
 
@@ -57,6 +58,12 @@ function initAiFeatures() {
     scoreFileInput.addEventListener('change', handleScoreImageFile);
   }
   if (runAnalysisBtn) runAnalysisBtn.addEventListener('click', runWeaknessAnalysis);
+
+  const scoreAddBtn = document.getElementById('scoreAddBtn');
+  if (scoreAddBtn) scoreAddBtn.addEventListener('click', addScoreRecord);
+
+  const applyPlanBtn = document.getElementById('applyPlanBtn');
+  if (applyPlanBtn) applyPlanBtn.addEventListener('click', applyPlanToSchedule);
 
   if (fileInput) {
     fileInput.addEventListener('change', () => {
@@ -217,7 +224,8 @@ async function handleChatSend() {
 
     const data = await response.json();
     if (!data.candidates?.length) throw new Error('APIからの応答が空です');
-    const aiResponseText = data.candidates[0].content.parts[0].text;
+    const aiResponseText = data.candidates[0].content?.parts?.[0]?.text ?? '';
+    if (!aiResponseText) throw new Error('安全フィルターによりコンテンツがブロックされました（finishReason: ' + (data.candidates[0].finishReason ?? 'UNKNOWN') + '）。');
 
     appendMessage(aiResponseText, false);
     chatHistory.push({ role: 'model', parts: [{ text: aiResponseText }] });
@@ -251,12 +259,16 @@ async function generateFinalPlan() {
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [...chatHistory, { role: 'user', parts: [{ text: "これまでの対話履歴をすべて分析し、学習ロードマップを作成してください。" }] }] })
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: "あなたはプロの学習プランナーです。ユーザーとの対話内容を分析し、具体的で実践的な学習ロードマップを作成してください。" }] },
+        contents: [...chatHistory, { role: 'user', parts: [{ text: "これまでの対話履歴をすべて分析し、学習ロードマップを作成してください。" }] }]
+      })
     });
     if (!response.ok) throw new Error(`APIエラー (Status: ${response.status})`);
     const data = await response.json();
     if (!data.candidates?.length) throw new Error('APIからの応答が空です');
-    let text = data.candidates[0].content.parts[0].text;
+    const text = data.candidates[0].content?.parts?.[0]?.text ?? '';
+    if (!text) throw new Error('安全フィルターによりコンテンツがブロックされました（finishReason: ' + (data.candidates[0].finishReason ?? 'UNKNOWN') + '）。');
     const sanitized = typeof DOMPurify !== 'undefined'
       ? DOMPurify.sanitize(text.replace(/\n/g, '<br>'))
       : text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
@@ -281,19 +293,86 @@ function resetChat() {
   }
 }
 
-/* --- 成績画像プレビュー --- */
-function handleScoreImageFile(event) {
+/* --- 成績画像プレビュー＋AI自動入力 --- */
+async function handleScoreImageFile(event) {
   const file = event.target.files[0];
   if (!file) return;
   const preview = document.getElementById('scoreImagePreview');
   const container = document.getElementById('scoreImagePreviewContainer');
   if (!preview || !container) return;
+
+  // ① プレビュー表示（既存処理を維持）
   const reader = new FileReader();
   reader.onload = (e) => {
     preview.src = e.target.result;
     container.style.display = 'block';
   };
   reader.readAsDataURL(file);
+
+  // ② APIキー未設定ならAI解析をスキップ
+  const apiKeyEl = document.getElementById('geminiApiKey');
+  const apiKey = apiKeyEl ? apiKeyEl.value.trim() : '';
+  if (!apiKey) return;
+
+  // ③ 「解析中...」ステータス表示
+  const scoreExtractStatus = document.getElementById('scoreExtractStatus');
+  if (scoreExtractStatus) scoreExtractStatus.style.display = 'block';
+
+  try {
+    // ④ 画像をGemini API用パーツに変換
+    const part = await fileToGenerativePart(file);
+
+    const today = new Date().toISOString().slice(0, 10);
+    const prompt = `この画像は模試・テストの成績表または個人成績票です。以下のフィールドを読み取り、JSONのみで返してください（説明文・コードブロック不要）。
+フィールド:
+- date: 試験日（YYYY-MM-DD形式。不明なら "${today}"）
+- subject: 教科名（例: 英語, 数学, 国語）
+- category: 分野・単元（例: リスニング, 数列。不明なら空文字）
+- examType: 試験種別（例: 全統模試, 定期試験。不明なら空文字）
+- score: 得点（数値。不明なら null）
+- total: 満点（数値。不明なら null）
+- deviation: 偏差値（数値。不明なら null）
+- note: 特記事項（不明なら空文字）
+
+例: {"date":"2025-06-01","subject":"英語","category":"","examType":"全統模試","score":85,"total":100,"deviation":62.5,"note":""}`;
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }, part] }] })
+      }
+    );
+
+    if (!response.ok) throw new Error(`APIエラー (Status: ${response.status})`);
+    const data = await response.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+    if (!text) throw new Error('解析結果が空です');
+
+    // ⑤ JSONパースしてフォームへ自動入力
+    const extracted = parseJsonFromText(text);
+    const fieldMap = {
+      scoreDate:      extracted.date      ?? '',
+      scoreSubject:   extracted.subject   ?? '',
+      scoreCategory:  extracted.category  ?? '',
+      scoreExamType:  extracted.examType  ?? '',
+      scoreScore:     extracted.score     != null ? String(extracted.score)     : '',
+      scoreTotal:     extracted.total     != null ? String(extracted.total)     : '',
+      scoreDeviation: extracted.deviation != null ? String(extracted.deviation) : '',
+      scoreNote:      extracted.note      ?? '',
+    };
+    for (const [id, val] of Object.entries(fieldMap)) {
+      const el = document.getElementById(id);
+      if (el) el.value = val;
+    }
+  } catch (e) {
+    const errorEl = document.getElementById('analysisErrorMsg');
+    if (errorEl) errorEl.textContent = '画像解析エラー: ' + e.message;
+  } finally {
+    // ⑥ 「解析中...」ステータスを非表示に戻す
+    if (scoreExtractStatus) scoreExtractStatus.style.display = 'none';
+  }
 }
 
 /* --- AI弱点分析 --- */
@@ -340,7 +419,8 @@ async function runWeaknessAnalysis() {
     if (!response.ok) throw new Error(`APIエラー (Status: ${response.status})`);
     const data = await response.json();
     if (!data.candidates?.length) throw new Error('APIからの応答が空です');
-    const result = data.candidates[0].content.parts[0].text;
+    const result = data.candidates[0].content?.parts?.[0]?.text ?? '';
+    if (!result) throw new Error('安全フィルターによりコンテンツがブロックされました（finishReason: ' + (data.candidates[0].finishReason ?? 'UNKNOWN') + '）。');
     try {
       // ANALYSIS_KEY はjs-app.jsのグローバル定数 'vocab-weakness-analysis'
       localStorage.setItem(typeof ANALYSIS_KEY !== 'undefined' ? ANALYSIS_KEY : 'vocab-weakness-analysis',
