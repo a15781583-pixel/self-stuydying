@@ -41,7 +41,21 @@ function initAiFeatures() {
   if (chatInput) chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing && !e.shiftKey) handleChatSend(); });
   if (chatStopBtn) chatStopBtn.addEventListener('click', () => { if (abortController) abortController.abort(); });
   if (generatePlanBtn) generatePlanBtn.addEventListener('click', generateFinalPlan);
-  if (scoreFileInput) scoreFileInput.addEventListener('change', handleScoreImageFile);
+  if (scoreFileInput) {
+    // Bug 3 Fix: HTMLに id="scoreImagePreview/Container" が存在しないため動的生成して挿入する
+    if (!document.getElementById('scoreImagePreviewContainer')) {
+      const scorePreviewContainer = document.createElement('div');
+      scorePreviewContainer.id = 'scoreImagePreviewContainer';
+      scorePreviewContainer.style.cssText = 'display:none; margin-top:8px;';
+      const scorePreviewImg = document.createElement('img');
+      scorePreviewImg.id = 'scoreImagePreview';
+      scorePreviewImg.alt = '成績画像プレビュー';
+      scorePreviewImg.style.cssText = 'max-width:100%; max-height:200px; border-radius:8px; display:block;';
+      scorePreviewContainer.appendChild(scorePreviewImg);
+      scoreFileInput.insertAdjacentElement('afterend', scorePreviewContainer);
+    }
+    scoreFileInput.addEventListener('change', handleScoreImageFile);
+  }
   if (runAnalysisBtn) runAnalysisBtn.addEventListener('click', runWeaknessAnalysis);
 
   if (fileInput) {
@@ -72,7 +86,7 @@ async function loadSavedApiKey() {
     const input = document.getElementById('geminiApiKey');
     if (!input) return;
     if (typeof window.storage !== 'undefined') {
-      const res = await window.storage.get(API_KEY_STORAGE_KEY, true);
+      const res = await window.storage.get(API_KEY_STORAGE_KEY, false);
       if(res && res.value) input.value = res.value;
     } else {
       const saved = localStorage.getItem(API_KEY_STORAGE_KEY);
@@ -85,7 +99,7 @@ let apiKeySaveTimer = null;
 async function saveApiKey(value) {
   try {
     if (typeof window.storage !== 'undefined') {
-      await window.storage.set(API_KEY_STORAGE_KEY, value, true);
+      await window.storage.set(API_KEY_STORAGE_KEY, value, false);
     } else {
       if (value) localStorage.setItem(API_KEY_STORAGE_KEY, value);
       else localStorage.removeItem(API_KEY_STORAGE_KEY);
@@ -176,7 +190,7 @@ async function handleChatSend() {
   chatHistory.push({ role: 'user', parts: parts });
 
   chatInput.value = '';
-  fileInput.value = '';
+  if (fileInput) fileInput.value = '';
   document.getElementById('imagePreviewContainer').style.display = 'none';
   chatInput.disabled = true;
 
@@ -239,6 +253,7 @@ async function generateFinalPlan() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ contents: [...chatHistory, { role: 'user', parts: [{ text: "これまでの対話履歴をすべて分析し、学習ロードマップを作成してください。" }] }] })
     });
+    if (!response.ok) throw new Error(`APIエラー (Status: ${response.status})`);
     const data = await response.json();
     if (!data.candidates?.length) throw new Error('APIからの応答が空です');
     let text = data.candidates[0].content.parts[0].text;
