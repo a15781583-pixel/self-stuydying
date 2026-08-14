@@ -253,7 +253,7 @@ function buildAllReviews(){
     return !dailyProgress.some(p => {
       if (p.type !== 'word') return false;
       if (p.originEntryId != null) return p.entryId === chunkKey; // 新形式
-      return p.date === c.date && p.entryId === c.entryId;        // 旧形式
+      return p.date === c.date && p.entryId === c.entryId && p.rangeStart === c.rangeStart; // 旧形式
     });
   });
 
@@ -1647,7 +1647,7 @@ function previewProgressAdjustment(container, dateStr, baseId) {
       // 新規タスクで予定より進んだ場合のみスケジュール再調整バナーを表示
       hasAhead = true;
       aheadMessages.push(`${label}: ${val - plannedEnd}${unit}多く進みました！`);
-    } else if (val < plannedEnd && val >= plannedStart) {
+    } else if (val < plannedEnd && (val >= plannedStart || (isReview && val === plannedStart - 1))) {
       hasBehind = true;
       const diff = plannedEnd - val;
       if (isReview) {
@@ -1876,7 +1876,7 @@ function buildWordReviewPreviewHtml(dateStr, wordRecords) {
     }
 
     const slotsHtml = (entry.intervals || DEFAULT_INTERVALS).map(n => {
-      const d = parseISO(formatISO(addDays(parseISO(dateStr), n)));
+      const d = addDays(parseISO(dateStr), n);
       const wdLabel  = ['日','月','火','水','木','金','土'][d.getDay()];
       const dispDate = `${d.getMonth()+1}/${d.getDate()}（${wdLabel}）`;
       const tier      = getIntervalTier(n);
@@ -2046,23 +2046,24 @@ async function handleAdd(){
   const errorEl = document.getElementById('errorMsg');
   const planMode = document.querySelector('input[name="planMode"]:checked').value;
   const amountPerDay = Number(document.getElementById('amountPerDay').value);
-  errorEl.textContent = '';
+  const showError = (msg) => { if (errorEl) errorEl.textContent = msg; else alert(msg); };
+  if (errorEl) errorEl.textContent = '';
 
   if(!startNum || !endNum || endNum < startNum){
-    errorEl.textContent = '開始番号・終了番号を正しく入力してください（終了番号は開始番号以上）。'; return;
+    showError('開始番号・終了番号を正しく入力してください（終了番号は開始番号以上）。'); return;
   }
-  if(!startDate){ errorEl.textContent = '開始日を選択してください。'; return; }
+  if(!startDate){ showError('開始日を選択してください。'); return; }
   
   // 終了日のバリデーションを追加
   if(planMode === 'byRange') {
-    if(!endDate){ errorEl.textContent = '終了日を選択してください。'; return; }
-    if(new Date(endDate) < new Date(startDate)){ errorEl.textContent = '終了日は開始日以降の日付にしてください。'; return; }
+    if(!endDate){ showError('終了日を選択してください。'); return; }
+    if(new Date(endDate) < new Date(startDate)){ showError('終了日は開始日以降の日付にしてください。'); return; }
   }
 
-  if(weekdays.length === 0){ errorEl.textContent = '学習する曜日を1つ以上選んでください。'; return; }
-  if(intervals.length === 0){ errorEl.textContent = '復習のタイミングを1つ以上選んでください。'; return; }
+  if(weekdays.length === 0){ showError('学習する曜日を1つ以上選んでください。'); return; }
+  if(intervals.length === 0){ showError('復習のタイミングを1つ以上選んでください。'); return; }
   if(planMode === 'byAmount' && (!amountPerDay || amountPerDay <= 0)){
-    errorEl.textContent = '1日あたりの単語数を正しく入力してください。'; return;
+    showError('1日あたりの単語数を正しく入力してください。'); return;
   }
 
   // entryオブジェクトに endDate と reviewWeekdays を追加
@@ -2312,23 +2313,24 @@ async function handleScoreAdd(){
   const dateEl = document.getElementById('scoreDate');
   const noteEl = document.getElementById('scoreNote');
   const errorEl = document.getElementById('scoreErrorMsg');
-  errorEl.textContent = '';
+  const showError = (msg) => { if (errorEl) errorEl.textContent = msg; else alert(msg); };
+  if (errorEl) errorEl.textContent = '';
 
   const subject = subjectEl.value.trim();
   const score = Number(valueEl.value);
   if(totalEl.value === '' || isNaN(Number(totalEl.value)) || Number(totalEl.value) <= 0){
-    errorEl.textContent = '満点を正しく入力してください。'; return;
+    showError('満点を正しく入力してください。'); return;
   }
   const total = Number(totalEl.value);
   const examType = getSelectedExamType();
   const deviationRaw = deviationEl.value.trim();
   const deviation = deviationRaw !== '' ? Number(deviationRaw) : null;
 
-  if(!subject){ errorEl.textContent = '教科を入力してください。'; return; }
-  if(valueEl.value === '' || isNaN(score) || score < 0){ errorEl.textContent = '得点を正しく入力してください。'; return; }
-  if(score > total){ errorEl.textContent = '得点は満点以下で入力してください。'; return; }
+  if(!subject){ showError('教科を入力してください。'); return; }
+  if(valueEl.value === '' || isNaN(score) || score < 0){ showError('得点を正しく入力してください。'); return; }
+  if(score > total){ showError('得点は満点以下で入力してください。'); return; }
   if(deviation !== null && (isNaN(deviation) || deviation < 0 || deviation > 100)){
-    errorEl.textContent = '偏差値は0〜100の数値で入力してください（省略可）。'; return;
+    showError('偏差値は0〜100の数値で入力してください（省略可）。'); return;
   }
 
   scoreRecords.push({
@@ -2614,11 +2616,12 @@ function showTab(tabName) {
   buildWeekdayChips();
   buildWeekdayChips('reviewWeekdayRow', [0, 3, 6]);    // デフォルト：日・水・土
   buildIntervalChips();
-  document.getElementById('startDate').value = todayISO();
-  document.getElementById('addBtn').addEventListener('click', handleAdd);
-  document.getElementById('resetBtn').addEventListener('click', handleReset);
-  document.getElementById('leechAddBtn').addEventListener('click', handleLeechAdd);
-  document.getElementById('printBtn').addEventListener('click', () => window.print());
+  const startDateEl = document.getElementById('startDate');
+  if (startDateEl) startDateEl.value = todayISO();
+  document.getElementById('addBtn')?.addEventListener('click', handleAdd);
+  document.getElementById('resetBtn')?.addEventListener('click', handleReset);
+  document.getElementById('leechAddBtn')?.addEventListener('click', handleLeechAdd);
+  document.getElementById('printBtn')?.addEventListener('click', () => window.print());
 
   // 【追加】ラジオボタンで入力欄を切り替えるイベント
   document.querySelectorAll('input[name="planMode"]').forEach(radio => {
@@ -2693,6 +2696,88 @@ window.addEventListener('DOMContentLoaded', () => {
   // loadRefEntries() / renderIntegratedSchedule() / renderRefTodayCard() は
   // init() → loadRefEntries() → renderRefSchedule() → renderRefTodayCard() の
   // ルートで既にカバーされているため、ここでの呼び出しは不要（二重実行・競合防止）
+
+  // ③ 「スケジュールを登録」ボタンが押された時の処理
+  const saveRefPlanBtn = document.getElementById('saveRefPlanBtn');
+  if (saveRefPlanBtn) {
+    saveRefPlanBtn.addEventListener('click', () => {
+      const errorEl = document.getElementById('refErrorMsg');
+      if (errorEl) errorEl.textContent = '';
+
+      const bookName = document.getElementById('refBookName').value.trim();
+      const startNum = parseInt(document.getElementById('refStartNum').value, 10);
+      const endNum = parseInt(document.getElementById('refEndNum').value, 10);
+      const startDate = document.getElementById('refStartDate').value;
+      const planMode = document.querySelector('input[name="refPlanMode"]:checked').value;
+      const weekdays = getCheckedValues('refWeekdayRow');
+      const reviewWeekdays = getCheckedValues('refReviewWeekdayRow'); // ★復習曜日を取得
+
+      const showError = (msg) => { if (errorEl) errorEl.textContent = msg; else alert(msg); };
+
+      if (!bookName || isNaN(startNum) || isNaN(endNum) || !startDate) {
+        showError('すべての項目を正しく入力してください。');
+        return;
+      }
+      if (startNum > endNum) {
+        showError('開始ページは終了ページ以下の数値を入力してください。');
+        return;
+      }
+      if (weekdays.length === 0) {
+        showError('学習する曜日を1つ以上選んでください。');
+        return;
+      }
+
+      const newPlan = {
+        id: 'ref_' + Date.now(),
+        bookName: bookName,
+        startNum: startNum,
+        endNum: endNum,
+        startDate: startDate,
+        weekdays: weekdays,
+        reviewWeekdays: reviewWeekdays, // ★復習曜日を保存
+        planMode: planMode
+      };
+
+      if (planMode === 'byAmount') {
+        const amount = parseInt(document.getElementById('refAmountPerDay').value, 10);
+        if (!amount || amount <= 0) {
+          showError('1日あたり進める量を正しく入力してください。');
+          return;
+        }
+        newPlan.amountPerDay = amount;
+      } else {
+        const endDate = document.getElementById('refEndDate').value;
+        if (!endDate) {
+          showError('終了日を選択してください。');
+          return;
+        }
+        if (parseISO(endDate) < parseISO(startDate)) {
+          showError('終了日は開始日以降の日付にしてください。');
+          return;
+        }
+        newPlan.endDate = endDate;
+      }
+
+      // 事前にスケジュールを計算し、該当日がなければ登録前に知らせる
+      if (computeRefSchedule(newPlan).length === 0) {
+        showError('指定した期間・曜日では学習日がありません。設定を見直してください。');
+        return;
+      }
+
+      refEntries.push(newPlan);
+      saveRefEntries();
+      renderRefSchedule(); // 画面を更新
+
+      // 入力欄をクリア（教材名・ページ番号のみ）
+      document.getElementById('refBookName').value = '';
+      document.getElementById('refStartNum').value = '';
+      document.getElementById('refEndNum').value = '';
+
+      // 登録完了後：設定アコーディオンを閉じて「今日の確認」に注目させる
+      const settingDetails = document.getElementById('refSettingDetails');
+      if (settingDetails) settingDetails.open = false;
+    });
+  }
 });
 
 // ①-2 参考書スケジュールの計算（単語スケジュールのcomputeChunksForEntryと同じ考え方）
@@ -2711,88 +2796,6 @@ function loadRefEntries() {
     const settingDetails = document.getElementById('refSettingDetails');
     if (settingDetails) settingDetails.open = false;
   }
-}
-
-// ③ 「スケジュールを登録」ボタンが押された時の処理
-const saveRefPlanBtn = document.getElementById('saveRefPlanBtn');
-if (saveRefPlanBtn) {
-  saveRefPlanBtn.addEventListener('click', () => {
-    const errorEl = document.getElementById('refErrorMsg');
-    if (errorEl) errorEl.textContent = '';
-
-    const bookName = document.getElementById('refBookName').value.trim();
-    const startNum = parseInt(document.getElementById('refStartNum').value, 10);
-    const endNum = parseInt(document.getElementById('refEndNum').value, 10);
-    const startDate = document.getElementById('refStartDate').value;
-    const planMode = document.querySelector('input[name="refPlanMode"]:checked').value;
-    const weekdays = getCheckedValues('refWeekdayRow');
-    const reviewWeekdays = getCheckedValues('refReviewWeekdayRow'); // ★復習曜日を取得
-
-    const showError = (msg) => { if (errorEl) errorEl.textContent = msg; else alert(msg); };
-
-    if (!bookName || isNaN(startNum) || isNaN(endNum) || !startDate) {
-      showError('すべての項目を正しく入力してください。');
-      return;
-    }
-    if (startNum > endNum) {
-      showError('開始ページは終了ページ以下の数値を入力してください。');
-      return;
-    }
-    if (weekdays.length === 0) {
-      showError('学習する曜日を1つ以上選んでください。');
-      return;
-    }
-
-    const newPlan = {
-      id: 'ref_' + Date.now(),
-      bookName: bookName,
-      startNum: startNum,
-      endNum: endNum,
-      startDate: startDate,
-      weekdays: weekdays,
-      reviewWeekdays: reviewWeekdays, // ★復習曜日を保存
-      planMode: planMode
-    };
-
-    if (planMode === 'byAmount') {
-      const amount = parseInt(document.getElementById('refAmountPerDay').value, 10);
-      if (!amount || amount <= 0) {
-        showError('1日あたり進める量を正しく入力してください。');
-        return;
-      }
-      newPlan.amountPerDay = amount;
-    } else {
-      const endDate = document.getElementById('refEndDate').value;
-      if (!endDate) {
-        showError('終了日を選択してください。');
-        return;
-      }
-      if (parseISO(endDate) < parseISO(startDate)) {
-        showError('終了日は開始日以降の日付にしてください。');
-        return;
-      }
-      newPlan.endDate = endDate;
-    }
-
-    // 事前にスケジュールを計算し、該当日がなければ登録前に知らせる
-    if (computeRefSchedule(newPlan).length === 0) {
-      showError('指定した期間・曜日では学習日がありません。設定を見直してください。');
-      return;
-    }
-
-    refEntries.push(newPlan);
-    saveRefEntries();
-    renderRefSchedule(); // 画面を更新
-    
-    // 入力欄をクリア（教材名・ページ番号のみ）
-    document.getElementById('refBookName').value = '';
-    document.getElementById('refStartNum').value = '';
-    document.getElementById('refEndNum').value = '';
-
-    // 登録完了後：設定アコーディオンを閉じて「今日の確認」に注目させる
-    const settingDetails = document.getElementById('refSettingDetails');
-    if (settingDetails) settingDetails.open = false;
-  });
 }
 
 // ④ 参考書スケジュール：登録済みプランの一覧表示（単語タブのentryListと同じ考え方）
