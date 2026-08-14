@@ -26,6 +26,20 @@ function injectAiNavButtons() {
 // AI機能の初期化・イベントリスナー登録
 function initAiFeatures() {
   injectAiNavButtons(); // ① AIタブボタンをナビゲーションバーへ挿入
+
+  // ② 注入完了後にハッシュを読んでタブを切り替える
+  // ここで追加する理由：この時点でAIタブボタン（tab-btn-coach 等）がDOMに存在するため
+  // showTab() が正しく機能する。js-app.js の init() 時点ではまだボタンが未注入のため不可。
+  const VALID_TABS = ['schedule', 'study', 'coach', 'analysis', 'reference'];
+
+  const applyHash = () => {
+    const hash = window.location.hash.replace('#', '');
+    if (VALID_TABS.includes(hash)) showTab(hash);
+  };
+
+  applyHash(); // 初期ロード時のハッシュを処理
+  window.addEventListener('hashchange', applyHash); // 手動入力・外部リンクによるハッシュ変化を処理
+
   loadSavedApiKey();
   setupApiKeyPersistence();
 
