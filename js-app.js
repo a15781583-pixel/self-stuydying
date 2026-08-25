@@ -22,6 +22,12 @@ let scoreRecords = [];
 let scoreChartInstance = null;
 let deviationChartInstance = null;
 let refEntries = []; // 参考書の予定を保存する配列
+// ── スケジュール編集モード管理用（単語） ─────────────────────
+let editingEntryId = null;        // 現在編集中の単語エントリID（nullなら新規追加モード）
+let entryFormSnapshot = null;      // 編集開始前のフォーム内容（キャンセル時に復元）
+// ── スケジュール編集モード管理用（参考書） ───────────────────
+let editingRefEntryId = null;      // 現在編集中の参考書エントリID（nullなら新規追加モード）
+let refFormSnapshot = null;        // 編集開始前のフォーム内容（キャンセル時に復元）
 let reviewDoneSet = new Set(); // クリア済みの復習項目キーの集合
 // 日別進捗記録: [{ id, date, entryId, type:'word'|'book', plannedStart, plannedEnd, actualEnd, bookName? }]
 let dailyProgress = [];
@@ -731,6 +737,17 @@ function getCheckedValues(rowId){
   return Array.from(document.querySelectorAll(`#${rowId} input:checked`)).map(el => Number(el.value));
 }
 
+// チップ群（曜日・インターバル）に既存の値を反映させる（編集モードでフォームへ復元する用）
+function setCheckedValues(rowId, values = []) {
+  const row = document.getElementById(rowId);
+  if (!row) return;
+  row.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+    const isChecked = values.includes(Number(cb.value));
+    cb.checked = isChecked;
+    cb.closest('.chip')?.classList.toggle('checked', isChecked);
+  });
+}
+
 async function loadEntries(){
   entries = loadFromStorage(STORAGE_KEY);
 }
@@ -802,17 +819,26 @@ function renderEntryList(){
       modeText = entry.endDate ? `${entry.startDate} 〜 ${entry.endDate}` : `開始日 ${entry.startDate} (1週間)`;
     }
 
+    item.classList.toggle('is-editing', entry.id === editingEntryId);
     item.innerHTML = `
       <div>
         <span class="rng">${entry.startNum}〜${entry.endNum}</span>
         <div class="meta">${modeText} ／ 学習日: ${wdLabel} ／ 復習: ${(entry.intervals ?? []).join('・')}日後</div>
       </div>
-      <button class="del-btn" data-id="${entry.id}">削除</button>
+      <div class="entry-actions">
+        <button class="edit-btn" data-id="${entry.id}">編集</button>
+        <button class="del-btn" data-id="${entry.id}">削除</button>
+      </div>
     `;
     list.appendChild(item);
   });
+  list.querySelectorAll('.edit-btn').forEach(btn => {
+    btn.addEventListener('click', () => startEditEntry(btn.dataset.id));
+  });
   list.querySelectorAll('.del-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
+      // 編集中の項目が削除された場合は編集モードを解除しておく（不整合防止）
+      if (editingEntryId === btn.dataset.id) exitEntryEditMode();
       entries = entries.filter(e => e.id !== btn.dataset.id);
       await saveEntries();
       renderAll();
@@ -2035,6 +2061,96 @@ function renderAll(){
   renderTodayNew();
 }
 
+// ── 単語スケジュールの編集モード ──────────────────────────────
+
+// 現在のフォーム入力内容をスナップショットとして取得（キャンセル時の復元用）
+function getPlanFormState(){
+  return {
+    planMode: document.querySelector('input[name="planMode"]:checked')?.value || 'byRange',
+    startNum: document.getElementById('startNum').value,
+    endNum: document.getElementById('endNum').value,
+    startDate: document.getElementById('startDate').value,
+    endDate: document.getElementById('endDate').value,
+    amountPerDay: document.getElementById('amountPerDay').value,
+    weekdays: getCheckedValues('weekdayRow'),
+    reviewWeekdays: getCheckedValues('reviewWeekdayRow'),
+    intervals: getCheckedValues('intervalRow'),
+  };
+}
+
+// スナップショット（または既存エントリの値）をフォームへ反映する
+function setPlanFormState(state){
+  if (!state) return;
+  const modeRadio = document.querySelector(`input[name="planMode"][value="${state.planMode}"]`);
+  if (modeRadio) {
+    modeRadio.checked = true;
+    modeRadio.dispatchEvent(new Event('change')); // 表示切替（既存の change ハンドラを再利用）
+  }
+  document.getElementById('startNum').value = state.startNum ?? '';
+  document.getElementById('endNum').value = state.endNum ?? '';
+  document.getElementById('startDate').value = state.startDate ?? '';
+  document.getElementById('endDate').value = state.endDate ?? '';
+  document.getElementById('amountPerDay').value = state.amountPerDay ?? '';
+  setCheckedValues('weekdayRow', state.weekdays || []);
+  setCheckedValues('reviewWeekdayRow', state.reviewWeekdays || []);
+  setCheckedValues('intervalRow', state.intervals || []);
+}
+
+// 「編集」ボタン押下時：フォームに既存エントリの内容を読み込み、編集モードに入る
+function startEditEntry(id){
+  const entry = entries.find(e => e.id === id);
+  if (!entry) return;
+
+  // 今フォームに入っている内容を退避（キャンセルされた場合に戻すため）
+  entryFormSnapshot = getPlanFormState();
+
+  setPlanFormState({
+    planMode: entry.planMode,
+    startNum: entry.startNum,
+    endNum: entry.endNum,
+    startDate: entry.startDate,
+    endDate: entry.endDate,
+    amountPerDay: entry.amountPerDay,
+    weekdays: entry.weekdays,
+    reviewWeekdays: entry.reviewWeekdays,
+    intervals: entry.intervals,
+  });
+
+  editingEntryId = id;
+  const errorEl = document.getElementById('errorMsg');
+  if (errorEl) errorEl.textContent = '';
+
+  const addBtn = document.getElementById('addBtn');
+  if (addBtn) addBtn.textContent = '✅ 変更を保存';
+  const cancelBtn = document.getElementById('cancelEditBtn');
+  if (cancelBtn) cancelBtn.style.display = '';
+
+  // 設定パネルを開いてフォームまでスクロール（閉じていても編集内容が見えるように）
+  const setupDetails = document.getElementById('setup');
+  if (setupDetails) setupDetails.open = true;
+  setupDetails?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  renderEntryList(); // 編集中の行をハイライトするため再描画
+}
+
+// ボタン表示・状態だけを新規追加モードへ戻す（フォーム内容には触れない）
+function exitEntryEditMode(){
+  editingEntryId = null;
+  entryFormSnapshot = null;
+  const addBtn = document.getElementById('addBtn');
+  if (addBtn) addBtn.textContent = 'この範囲をスケジュールに追加';
+  const cancelBtn = document.getElementById('cancelEditBtn');
+  if (cancelBtn) cancelBtn.style.display = 'none';
+}
+
+// 「編集をキャンセル」ボタン押下時：フォームを編集前の状態に戻す
+function cancelEditEntry(){
+  const snapshot = entryFormSnapshot;
+  exitEntryEditMode();
+  setPlanFormState(snapshot);
+  renderEntryList();
+}
+
 async function handleAdd(){
   const startNum = Number(document.getElementById('startNum').value);
   const endNum = Number(document.getElementById('endNum').value);
@@ -2066,8 +2182,17 @@ async function handleAdd(){
     showError('1日あたりの単語数を正しく入力してください。'); return;
   }
 
-  // entryオブジェクトに endDate と reviewWeekdays を追加
-  entries.push({ id: 'e' + Date.now(), startNum, endNum, startDate, endDate, weekdays, reviewWeekdays, intervals, planMode, amountPerDay });
+  if (editingEntryId) {
+    // 編集モード：IDを維持したまま内容だけ差し替える
+    // （IDを変えると復習履歴・進捗記録との紐付けが切れてしまうため）
+    entries = entries.map(e => e.id === editingEntryId
+      ? { ...e, startNum, endNum, startDate, endDate, weekdays, reviewWeekdays, intervals, planMode, amountPerDay }
+      : e);
+    exitEntryEditMode();
+  } else {
+    // entryオブジェクトに endDate と reviewWeekdays を追加
+    entries.push({ id: 'e' + Date.now(), startNum, endNum, startDate, endDate, weekdays, reviewWeekdays, intervals, planMode, amountPerDay });
+  }
   await saveEntries();
   renderAll();
 }
@@ -2075,6 +2200,7 @@ async function handleAdd(){
 async function handleReset(){
   if(!confirm('登録した範囲をすべて削除します。よろしいですか？')) return;
   entries = [];
+  exitEntryEditMode(); // 全削除時は編集状態も解除しておく
   await saveEntries();
   renderAll();
 }
@@ -2620,6 +2746,7 @@ function showTab(tabName) {
   if (startDateEl) startDateEl.value = todayISO();
   document.getElementById('addBtn')?.addEventListener('click', handleAdd);
   document.getElementById('resetBtn')?.addEventListener('click', handleReset);
+  document.getElementById('cancelEditBtn')?.addEventListener('click', cancelEditEntry);
   document.getElementById('leechAddBtn')?.addEventListener('click', handleLeechAdd);
   document.getElementById('printBtn')?.addEventListener('click', () => window.print());
 
@@ -2728,7 +2855,7 @@ window.addEventListener('DOMContentLoaded', () => {
       }
 
       const newPlan = {
-        id: 'ref_' + Date.now(),
+        // id は下部で「新規なら新規発行／編集中なら既存IDを維持」して設定する
         bookName: bookName,
         startNum: startNum,
         endNum: endNum,
@@ -2764,7 +2891,16 @@ window.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      refEntries.push(newPlan);
+      if (editingRefEntryId) {
+        // 編集モード：IDを維持したまま内容だけ差し替える
+        // （IDを変えると復習履歴・進捗記録との紐付けが切れてしまうため）
+        newPlan.id = editingRefEntryId;
+        refEntries = refEntries.map(p => p.id === editingRefEntryId ? newPlan : p);
+        exitRefEditMode();
+      } else {
+        newPlan.id = 'ref_' + Date.now();
+        refEntries.push(newPlan);
+      }
       saveRefEntries();
       renderRefSchedule(); // 画面を更新
 
@@ -2778,6 +2914,8 @@ window.addEventListener('DOMContentLoaded', () => {
       if (settingDetails) settingDetails.open = false;
     });
   }
+
+  document.getElementById('cancelRefEditBtn')?.addEventListener('click', cancelEditRefEntry);
 });
 
 // ①-2 参考書スケジュールの計算（単語スケジュールのcomputeChunksForEntryと同じ考え方）
@@ -2824,25 +2962,116 @@ function renderRefEntryList(){
     }
 
     const item = document.createElement('div');
-    item.className = 'entry-item';
+    item.className = 'entry-item' + (plan.id === editingRefEntryId ? ' is-editing' : '');
     item.innerHTML = `
       <div>
         <span class="rng">${escapeHtml(plan.bookName)}　${plan.startNum}〜${plan.endNum}</span>
         <div class="meta">開始日 ${plan.startDate} ／ 学習日: ${wdLabel || '―'} ／ ${calcInfo} ／ 復習: 進捗入力時に自動設定</div>
       </div>
-      <button class="del-btn ref-del-btn" data-id="${plan.id}">削除</button>
+      <div class="entry-actions">
+        <button class="edit-btn ref-edit-btn" data-id="${plan.id}">編集</button>
+        <button class="del-btn ref-del-btn" data-id="${plan.id}">削除</button>
+      </div>
     `;
     list.appendChild(item);
   });
 
+  list.querySelectorAll('.ref-edit-btn').forEach(btn => {
+    btn.addEventListener('click', () => startEditRefEntry(btn.dataset.id));
+  });
   list.querySelectorAll('.ref-del-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       if (!confirm('この参考書のスケジュールを削除しますか？')) return;
+      // 編集中の項目が削除された場合は編集モードを解除しておく（不整合防止）
+      if (editingRefEntryId === btn.dataset.id) exitRefEditMode();
       refEntries = refEntries.filter(p => p.id !== btn.dataset.id);
       saveRefEntries();
       renderRefSchedule();
     });
   });
+}
+
+// ── 参考書スケジュールの編集モード ────────────────────────────
+
+function getRefFormState(){
+  return {
+    planMode: document.querySelector('input[name="refPlanMode"]:checked')?.value || 'byRange',
+    bookName: document.getElementById('refBookName').value,
+    startNum: document.getElementById('refStartNum').value,
+    endNum: document.getElementById('refEndNum').value,
+    startDate: document.getElementById('refStartDate').value,
+    endDate: document.getElementById('refEndDate').value,
+    amountPerDay: document.getElementById('refAmountPerDay').value,
+    weekdays: getCheckedValues('refWeekdayRow'),
+    reviewWeekdays: getCheckedValues('refReviewWeekdayRow'),
+  };
+}
+
+function setRefFormState(state){
+  if (!state) return;
+  const modeRadio = document.querySelector(`input[name="refPlanMode"][value="${state.planMode}"]`);
+  if (modeRadio) {
+    modeRadio.checked = true;
+    modeRadio.dispatchEvent(new Event('change'));
+  }
+  document.getElementById('refBookName').value = state.bookName ?? '';
+  document.getElementById('refStartNum').value = state.startNum ?? '';
+  document.getElementById('refEndNum').value = state.endNum ?? '';
+  document.getElementById('refStartDate').value = state.startDate ?? '';
+  document.getElementById('refEndDate').value = state.endDate ?? '';
+  document.getElementById('refAmountPerDay').value = state.amountPerDay ?? '';
+  setCheckedValues('refWeekdayRow', state.weekdays || []);
+  setCheckedValues('refReviewWeekdayRow', state.reviewWeekdays || []);
+}
+
+function startEditRefEntry(id){
+  const plan = refEntries.find(p => p.id === id);
+  if (!plan) return;
+
+  refFormSnapshot = getRefFormState();
+
+  setRefFormState({
+    planMode: plan.planMode,
+    bookName: plan.bookName,
+    startNum: plan.startNum,
+    endNum: plan.endNum,
+    startDate: plan.startDate,
+    endDate: plan.endDate,
+    amountPerDay: plan.amountPerDay,
+    weekdays: plan.weekdays,
+    reviewWeekdays: plan.reviewWeekdays,
+  });
+
+  editingRefEntryId = id;
+  const errorEl = document.getElementById('refErrorMsg');
+  if (errorEl) errorEl.textContent = '';
+
+  const saveBtn = document.getElementById('saveRefPlanBtn');
+  if (saveBtn) saveBtn.textContent = '✅ 変更を保存';
+  const cancelBtn = document.getElementById('cancelRefEditBtn');
+  if (cancelBtn) cancelBtn.style.display = '';
+
+  const settingDetails = document.getElementById('refSettingDetails');
+  if (settingDetails) settingDetails.open = true;
+  settingDetails?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  renderRefEntryList();
+}
+
+function exitRefEditMode(){
+  editingRefEntryId = null;
+  refFormSnapshot = null;
+  const saveBtn = document.getElementById('saveRefPlanBtn');
+  if (saveBtn) saveBtn.textContent = 'スケジュールを生成して登録';
+  const cancelBtn = document.getElementById('cancelRefEditBtn');
+  if (cancelBtn) cancelBtn.style.display = 'none';
+}
+
+function cancelEditRefEntry(){
+  const snapshot = refFormSnapshot;
+  exitRefEditMode();
+  setRefFormState(snapshot);
+  renderRefEntryList();
 }
 
 // ⑤ 参考書タブ全体の再描画（登録リスト＋今日やること）
