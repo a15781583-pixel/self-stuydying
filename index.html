@@ -164,7 +164,10 @@
       </div>
     </div>
     <div class="error-msg" id="errorMsg"></div>
-    <button class="btn-primary" id="addBtn" style="margin-top:10px;">この範囲をスケジュールに追加</button>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
+      <button class="btn-primary" id="addBtn">この範囲をスケジュールに追加</button>
+      <button class="btn-ghost" id="cancelEditBtn" style="display:none;">編集をキャンセル</button>
+    </div>
     <div class="entry-list" id="entryList"></div>
 
     <h3 class="sub-head">② スケジュール表（単語 + 参考書）</h3>
@@ -311,7 +314,10 @@
         </div>
 
         <div class="error-msg" id="refErrorMsg"></div>
-        <button id="saveRefPlanBtn" class="btn-primary" style="width: 100%;">スケジュールを生成して登録</button>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button id="saveRefPlanBtn" class="btn-primary" style="flex:1; min-width:200px;">スケジュールを生成して登録</button>
+          <button id="cancelRefEditBtn" class="btn-ghost" style="display:none;">編集をキャンセル</button>
+        </div>
         <div class="entry-list" id="refEntryList"></div>
 
       </div><!-- /.ref-setting-body -->
