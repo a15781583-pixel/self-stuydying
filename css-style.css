@@ -201,10 +201,17 @@
   }
   .entry-item .rng{ font-family:'IBM Plex Mono', monospace; font-weight:600; }
   .entry-item .meta{ color:var(--ink-soft); font-size:.78rem; margin-top:2px; }
+  .entry-actions{ display:flex; align-items:center; gap:4px; flex-shrink:0; }
   .del-btn{
     background:none; border:none; color:var(--margin-red); font-size:.78rem; cursor:pointer; padding:4px 6px;
     text-decoration:underline;
   }
+  .edit-btn{
+    background:none; border:none; color:var(--ink-soft); font-size:.78rem; cursor:pointer; padding:4px 6px;
+    text-decoration:underline;
+  }
+  .edit-btn:hover{ color:var(--ink); }
+  .entry-item.is-editing{ border-color:var(--gold, #a97c1f); background:var(--gold-bg, #fdf6e3); }
   .schedule-wrap{ overflow-x:auto; max-width:100%; }
   table{
     border-collapse:collapse;
@@ -604,7 +611,7 @@
       align-items: flex-start;
       gap: 8px;
     }
-    .del-btn {
+    .entry-actions {
       align-self: flex-end;
     }
 
