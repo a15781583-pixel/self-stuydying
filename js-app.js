@@ -250,7 +250,10 @@ function buildProgressReviews(progressItems, prefix, getResolved, getEntity, get
 //   残りのスケジュールを自動再配分する。
 function buildAllReviews(){
   // ─── 単語 ─────────────────────────────────────────────────────────────
-  const vocabChunks = entries.flatMap(computeAdjustedChunksForEntry);
+  // ★ 参考書（refChunks）と設計を共通化：各チャンクに教材名(bookName)を付与する
+  const vocabChunks = entries.flatMap(entry =>
+    computeAdjustedChunksForEntry(entry).map(c => ({ ...c, bookName: entry.bookName }))
+  );
 
   // 進捗記録済み・繰り越しチャンクを除外してからヘルパーへ渡す
   // composite key でも照合（繰り越し後に入力したケースに対応）
@@ -270,7 +273,7 @@ function buildAllReviews(){
       c => c.entryId,
       c => entries.find(e => e.id === c.entryId)?.reviewWeekdays || [],
       c => c.intervals,
-      c => ({ entryId: c.entryId })
+      c => ({ entryId: c.entryId, bookName: c.bookName })
     ),
     ...buildProgressReviews(
       dailyProgress.filter(p => p.type === 'word' && !p.notProgressed),
@@ -278,7 +281,7 @@ function buildAllReviews(){
       p => p.originEntryId || p.entryId,
       id => entries.find(e => e.id === id),
       entity => entity.intervals || DEFAULT_INTERVALS,
-      (p, resolved) => ({ entryId: resolved })
+      (p, resolved, entity) => ({ entryId: resolved, bookName: entity.bookName })
     ),
   ];
 
@@ -429,7 +432,7 @@ function adjustReviewsForCarryForward(vocabReviews, refReviews, cfVocab, cfRef) 
     c => c.entryId,
     c => entries.find(e => e.id === c.entryId)?.reviewWeekdays || [],
     c => c.intervals,
-    c => ({ entryId: c.entryId })
+    c => ({ entryId: c.entryId, bookName: c.bookName })
   );
 
   // ★ 修正：cfRef の繰越チャンクから新しい日付基準で復習を再生成（単語の cfVocab と対称）
@@ -823,7 +826,7 @@ function renderEntryList(){
     item.classList.toggle('is-editing', entry.id === editingEntryId);
     item.innerHTML = `
       <div>
-        <span class="rng">${entry.startNum}〜${entry.endNum}</span>
+        <span class="rng">${escapeHtml(entry.bookName || '単語')}　${entry.startNum}〜${entry.endNum}</span>
         <div class="meta">${modeText} ／ 学習日: ${wdLabel} ／ 復習: ${(entry.intervals ?? []).join('・')}日後</div>
       </div>
       <div class="entry-actions">
@@ -907,12 +910,12 @@ function renderMergedSchedule(containerId){
         // STEP 8: 未完了繰越バッジを統一形式で表示
         const cfBadge = c.carriedForward ? buildCarryBadgeHtml(c.originalDate) : '';
         const cnBadge = c.isCarriedNew   ? buildCarryBadgeHtml(c.originalDate || null) : '';
-        return `<span class="tag tag-new">${c.rangeStart}〜${c.rangeEnd}${cfBadge}${cnBadge}</span>`;
+        return `<span class="tag tag-new">${escapeHtml(c.bookName || '単語')} ${c.rangeStart}〜${c.rangeEnd}${cfBadge}${cnBadge}</span>`;
       }).join('') || '—'}</td>
       <td>${row.reviewItems.map(r => {
         // STEP 8: 復習バッジを統一形式で表示（🔁 復習 Lv.X [N日後] + 🔄 [遅れN日]）
         const reviewBadge = buildReviewBadgeHtml(r.interval, r.delayedDays);
-        return `<label class="tag tag-review tag-review-t${getIntervalTier(r.interval)} review-check-label${r.done ? ' is-done' : ''}"><input type="checkbox" class="review-check" data-key="${r.key}" ${r.done ? 'checked' : ''}><span class="stamp">◎</span>${reviewBadge} ${r.rangeStart}〜${r.rangeEnd}</label>`;
+        return `<label class="tag tag-review tag-review-t${getIntervalTier(r.interval)} review-check-label${r.done ? ' is-done' : ''}"><input type="checkbox" class="review-check" data-key="${r.key}" ${r.done ? 'checked' : ''}><span class="stamp">◎</span>${reviewBadge} ${escapeHtml(r.bookName || '単語')} ${r.rangeStart}〜${r.rangeEnd}</label>`;
       }).join('') || '—'}</td>
       <td>${row.refItems.map(c => {
         // STEP 8: 参考書の未完了繰越バッジを統一形式で表示（carriedForward / isCarriedNew 両対応）
@@ -1024,7 +1027,7 @@ function renderIntegratedSchedule() {
       const carryBadge = w.carriedForward
         ? buildCarryBadgeHtml(w.originalDate)
         : (w.isCarriedNew ? buildCarryBadgeHtml(w.originalDate || null) : '');
-      taskHtml += `<div style="margin-top:6px;display:flex;flex-wrap:wrap;align-items:center;gap:4px;"><span style="background:#e3f2fd;color:#0d47a1;padding:2px 6px;border-radius:4px;font-size:0.75rem;font-weight:bold;">単語</span>${carryBadge}<span style="color:#333;font-size:.85rem;">${w.rangeStart} 〜 ${w.rangeEnd}</span></div>`;
+      taskHtml += `<div style="margin-top:6px;display:flex;flex-wrap:wrap;align-items:center;gap:4px;"><span style="background:#e3f2fd;color:#0d47a1;padding:2px 6px;border-radius:4px;font-size:0.75rem;font-weight:bold;">単語</span>${carryBadge}<span style="color:#333;font-size:.85rem;">${escapeHtml(w.bookName || '単語')}: ${w.rangeStart} 〜 ${w.rangeEnd}</span></div>`;
     });
 
     dayBooks.forEach(b => {
@@ -1040,7 +1043,7 @@ function renderIntegratedSchedule() {
       // 通常: 🔁 復習 Lv.X [N日後]  /  移動済み: 🔁 復習 Lv.X [N日後] + 🔄 [遅れN日]
       const ts = getIntervalTierStyle(r.interval);
       const reviewBadge = buildReviewBadgeHtml(r.interval, r.delayedDays);
-      taskHtml += `<div style="margin-top:6px;max-width:100%;overflow:hidden;"><label style="cursor:pointer;display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:6px 9px;border-radius:6px;background:${ts.bg};border:1px solid ${ts.border};${r.done ? 'opacity:.5;text-decoration:line-through;' : ''}"><input type="checkbox" class="review-check" data-key="${r.key}" ${r.done ? 'checked' : ''} style="margin:0;flex-shrink:0;">${reviewBadge}<span style="color:#333;font-size:.8rem;word-break:break-all;">単語 ${r.rangeStart}〜${r.rangeEnd}</span></label></div>`;
+      taskHtml += `<div style="margin-top:6px;max-width:100%;overflow:hidden;"><label style="cursor:pointer;display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:6px 9px;border-radius:6px;background:${ts.bg};border:1px solid ${ts.border};${r.done ? 'opacity:.5;text-decoration:line-through;' : ''}"><input type="checkbox" class="review-check" data-key="${r.key}" ${r.done ? 'checked' : ''} style="margin:0;flex-shrink:0;">${reviewBadge}<span style="color:#333;font-size:.8rem;word-break:break-all;">${escapeHtml(r.bookName || '単語')} ${r.rangeStart}〜${r.rangeEnd}</span></label></div>`;
     });
 
     dayBookReviews.forEach(r => {
@@ -1292,10 +1295,11 @@ function buildReviewProgressItems(pendingReviews, type, unit, dividerLabel, date
          </span>` : '';
     const badge = buildReviewBadgeHtml(r.interval, r.delayedDays);
     const nameLabel = type === 'word-review'
-      ? `単語 ${r.rangeStart}〜${r.rangeEnd}（${pc}個）`
+      ? `${escapeHtml(r.bookName || '単語')} ${r.rangeStart}〜${r.rangeEnd}（${pc}個）`
       : `${escapeHtml(r.bookName)} ${r.rangeStart}〜${r.rangeEnd}（${pc}ページ）`;
+    // ★ 単語・参考書で設計を共通化：どちらの種別も data-book-name を付与する
     const dataAttrs = type === 'word-review'
-      ? `data-review-key="${r.key}" data-type="${type}" data-planned-start="${r.rangeStart}" data-planned-end="${r.rangeEnd}" data-date="${dateStr}"`
+      ? `data-review-key="${r.key}" data-type="${type}" data-planned-start="${r.rangeStart}" data-planned-end="${r.rangeEnd}" data-date="${dateStr}" data-book-name="${escapeHtml(r.bookName || '単語')}"`
       : `data-review-key="${r.key}" data-type="${type}" data-planned-start="${r.rangeStart}" data-planned-end="${r.rangeEnd}" data-date="${dateStr}" data-book-name="${escapeHtml(r.bookName)}"`;
     html += `<div class="progress-item review-item t${tier}">
       <span class="progress-plan-label">${badge} ${nameLabel}</span>
@@ -1339,10 +1343,10 @@ function buildProgressInputSection(dateStr, dayWords, dayBooks, baseId, dayWordR
       : '';
     itemsHtml += `
       <div class="progress-item">
-        <span class="progress-plan-label">単語 ${w.rangeStart}〜${w.rangeEnd}（予定 ${plannedCount}個）</span>
+        <span class="progress-plan-label">${escapeHtml(w.bookName || '単語')} ${w.rangeStart}〜${w.rangeEnd}（予定 ${plannedCount}個）</span>
         ${buildProgControlHtml(
           w.rangeStart, w.rangeEnd, recordedVal, 'word', statusHtml,
-          `data-entry-id="${chunkKey}" data-origin-entry-id="${w.entryId}" data-type="word" data-planned-start="${w.rangeStart}" data-planned-end="${w.rangeEnd}" data-date="${dateStr}"`
+          `data-entry-id="${chunkKey}" data-origin-entry-id="${w.entryId}" data-type="word" data-planned-start="${w.rangeStart}" data-planned-end="${w.rangeEnd}" data-date="${dateStr}" data-book-name="${escapeHtml(w.bookName || '単語')}"`
         )}
       </div>`;
   });
@@ -1618,7 +1622,7 @@ function previewProgressAdjustment(container, dateStr, baseId) {
     const unit = (type === 'word' || type === 'word-review') ? '個' : 'ページ';
     const prefix = isReview ? '復習 ' : '';
     const label = (type === 'word' || type === 'word-review')
-      ? `${prefix}単語 ${plannedStart}〜${plannedEnd}`
+      ? `${prefix}${input.dataset.bookName || '単語'} ${plannedStart}〜${plannedEnd}`
       : `${prefix}${input.dataset.bookName || '参考書'} ${plannedStart}〜${plannedEnd}`;
 
     if (!isReview && val === plannedStart - 1) {
@@ -1950,7 +1954,8 @@ function renderTodayNew(){
   if(todayChunks.length === 0){
     box.innerHTML = `<div class="empty-mini">今日の新規範囲はありません。</div>`;
   }else{
-    box.innerHTML = todayChunks.map(c => `<span class="today-new-tag">${c.rangeStart}〜${c.rangeEnd}</span>`).join('');
+    // ★ 参考書の今日カードと設計を共通化：教材名を併記する
+    box.innerHTML = todayChunks.map(c => `<span class="today-new-tag">${escapeHtml(c.bookName || '単語')} ${c.rangeStart}〜${c.rangeEnd}</span>`).join('');
   }
 }
 
@@ -2023,6 +2028,7 @@ function renderAll(){
 function getPlanFormState(){
   return {
     planMode: document.querySelector('input[name="planMode"]:checked')?.value || 'byRange',
+    bookName: document.getElementById('wordBookName')?.value ?? '',
     startNum: document.getElementById('startNum').value,
     endNum: document.getElementById('endNum').value,
     startDate: document.getElementById('startDate').value,
@@ -2042,6 +2048,8 @@ function setPlanFormState(state){
     modeRadio.checked = true;
     modeRadio.dispatchEvent(new Event('change')); // 表示切替（既存の change ハンドラを再利用）
   }
+  const bookNameEl = document.getElementById('wordBookName');
+  if (bookNameEl) bookNameEl.value = state.bookName ?? '';
   document.getElementById('startNum').value = state.startNum ?? '';
   document.getElementById('endNum').value = state.endNum ?? '';
   document.getElementById('startDate').value = state.startDate ?? '';
@@ -2062,6 +2070,7 @@ function startEditEntry(id){
 
   setPlanFormState({
     planMode: entry.planMode,
+    bookName: entry.bookName,
     startNum: entry.startNum,
     endNum: entry.endNum,
     startDate: entry.startDate,
@@ -2084,6 +2093,9 @@ function startEditEntry(id){
   // 設定パネルを開いてフォームまでスクロール（閉じていても編集内容が見えるように）
   const setupDetails = document.getElementById('setup');
   if (setupDetails) setupDetails.open = true;
+  // ★①範囲登録の折りたたみも、ユーザーが閉じていた場合に備えて開いておく
+  const rangeDetails = document.getElementById('rangeRegisterDetails');
+  if (rangeDetails) rangeDetails.open = true;
   setupDetails?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
   renderEntryList(); // 編集中の行をハイライトするため再描画
@@ -2108,6 +2120,8 @@ function cancelEditEntry(){
 }
 
 async function handleAdd(){
+  // ★ 参考書と設計を共通化：教材名（任意項目、未入力なら「単語」として扱う）
+  const bookName = document.getElementById('wordBookName')?.value.trim() || '';
   const startNum = Number(document.getElementById('startNum').value);
   const endNum = Number(document.getElementById('endNum').value);
   const startDate = document.getElementById('startDate').value;
@@ -2142,12 +2156,12 @@ async function handleAdd(){
     // 編集モード：IDを維持したまま内容だけ差し替える
     // （IDを変えると復習履歴・進捗記録との紐付けが切れてしまうため）
     entries = entries.map(e => e.id === editingEntryId
-      ? { ...e, startNum, endNum, startDate, endDate, weekdays, reviewWeekdays, intervals, planMode, amountPerDay }
+      ? { ...e, bookName, startNum, endNum, startDate, endDate, weekdays, reviewWeekdays, intervals, planMode, amountPerDay }
       : e);
     exitEntryEditMode();
   } else {
     // entryオブジェクトに endDate と reviewWeekdays を追加
-    entries.push({ id: 'e' + Date.now(), startNum, endNum, startDate, endDate, weekdays, reviewWeekdays, intervals, planMode, amountPerDay });
+    entries.push({ id: 'e' + Date.now(), bookName, startNum, endNum, startDate, endDate, weekdays, reviewWeekdays, intervals, planMode, amountPerDay });
   }
   await saveEntries();
   renderAll();
