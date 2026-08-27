@@ -107,69 +107,80 @@
 
   <details class="setup-details" id="setup" open>
     <summary>⚙️ スケジュール設定</summary>
-    <h3 class="sub-head">① 今週の範囲を登録</h3>
-    <div class="field full" style="margin-bottom:14px;">
-      <label>割り振り方法</label>
-      <div style="display:flex; gap:16px; margin-top:6px; flex-wrap:wrap;">
-        <label style="cursor:pointer; display:flex; align-items:center; gap:4px; font-size:.85rem;">
-          <!-- valueを byRange に変更し、文言を合わせます -->
-          <input type="radio" name="planMode" value="byRange" checked>
-          学習する曜日から設定（開始日〜終了日で均等に分ける）
-        </label>
-        <label style="cursor:pointer; display:flex; align-items:center; gap:4px; font-size:.85rem;">
-          <input type="radio" name="planMode" value="byAmount">
-          1日の単語数を指定する（終了番号まで数週間続く）
-        </label>
-      </div>
-    </div>
-    <div class="form-grid">
-      <div class="field">
-        <label for="startNum">開始番号</label>
-        <input type="number" id="startNum" min="1" placeholder="例: 1500">
-      </div>
-      <div class="field">
-        <label for="endNum">終了番号</label>
-        <input type="number" id="endNum" min="1" placeholder="例: 1600">
-      </div>
-      <div class="field">
-        <label for="startDate">開始日</label>
-        <input type="date" id="startDate">
-      </div>
-      <!-- 追加：終了日の入力欄 -->
-      <div class="field" id="endDateWrap">
-        <label for="endDate">終了日</label>
-        <input type="date" id="endDate">
-      </div>
-      <div class="field" id="amountFieldWrap" style="display:none;">
-        <label for="amountPerDay">1日の単語数</label>
-        <input type="number" id="amountPerDay" min="1" placeholder="例: 30">
-      </div>
-      <div class="field">
-        <label>学習する曜日（新規を覚える日）</label>
-        <div class="checkbox-row" id="weekdayRow"></div>
-      </div>
-      <div class="field full" id="reviewWeekdayWrap">
-        <label>復習を行う曜日（復習タスクが割り当てられる曜日）</label>
-        <div class="checkbox-row" id="reviewWeekdayRow"></div>
-        <div class="hint">例：日・水・土など。インターバル日数（1・3・7・14日後）の後、最初に一致する曜日に復習がスケジュールされます。</div>
-      </div>
-      <div class="field full">
-        <label>復習を入れるタイミング</label>
-        <div class="checkbox-row" id="intervalRow"></div>
-        <div class="hint">推奨：1日後・3日後・7日後・14日後。他教科との兼ね合いで負担が大きければ間引いてOKです。</div>
-      </div>
-    </div>
-    <div class="error-msg" id="errorMsg"></div>
-    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
-      <button class="btn-primary" id="addBtn">この範囲をスケジュールに追加</button>
-      <button class="btn-ghost" id="cancelEditBtn" style="display:none;">編集をキャンセル</button>
-    </div>
-    <div class="entry-list" id="entryList"></div>
 
-    <h3 class="sub-head">② スケジュール表（単語 + 参考書）</h3>
-    <div class="schedule-wrap">
-      <div id="scheduleArea"></div>
-    </div>
+    <details class="setup-details-sub" id="rangeRegisterDetails" open>
+      <summary class="setup-details-sub-summary">① 今週の範囲を登録</summary>
+      <div class="field full" style="margin-bottom:14px;">
+        <label>割り振り方法</label>
+        <div style="display:flex; gap:16px; margin-top:6px; flex-wrap:wrap;">
+          <label style="cursor:pointer; display:flex; align-items:center; gap:4px; font-size:.85rem;">
+            <!-- valueを byRange に変更し、文言を合わせます -->
+            <input type="radio" name="planMode" value="byRange" checked>
+            学習する曜日から設定（開始日〜終了日で均等に分ける）
+          </label>
+          <label style="cursor:pointer; display:flex; align-items:center; gap:4px; font-size:.85rem;">
+            <input type="radio" name="planMode" value="byAmount">
+            1日の単語数を指定する（終了番号まで数週間続く）
+          </label>
+        </div>
+      </div>
+      <div class="form-grid">
+        <!-- 参考書設定と設計を共通化：単語帳も教材名を入力可能にする（任意項目） -->
+        <div class="field full">
+          <label for="wordBookName">教材名（任意）</label>
+          <input type="text" id="wordBookName" placeholder="例: システム英単語、ターゲット1900">
+        </div>
+        <div class="field">
+          <label for="startNum">開始番号</label>
+          <input type="number" id="startNum" min="1" placeholder="例: 1500">
+        </div>
+        <div class="field">
+          <label for="endNum">終了番号</label>
+          <input type="number" id="endNum" min="1" placeholder="例: 1600">
+        </div>
+        <div class="field">
+          <label for="startDate">開始日</label>
+          <input type="date" id="startDate">
+        </div>
+        <!-- 追加：終了日の入力欄 -->
+        <div class="field" id="endDateWrap">
+          <label for="endDate">終了日</label>
+          <input type="date" id="endDate">
+        </div>
+        <div class="field" id="amountFieldWrap" style="display:none;">
+          <label for="amountPerDay">1日の単語数</label>
+          <input type="number" id="amountPerDay" min="1" placeholder="例: 30">
+        </div>
+        <div class="field">
+          <label>学習する曜日（新規を覚える日）</label>
+          <div class="checkbox-row" id="weekdayRow"></div>
+        </div>
+        <div class="field full" id="reviewWeekdayWrap">
+          <label>復習を行う曜日（復習タスクが割り当てられる曜日）</label>
+          <div class="checkbox-row" id="reviewWeekdayRow"></div>
+          <div class="hint">例：日・水・土など。インターバル日数（1・3・7・14日後）の後、最初に一致する曜日に復習がスケジュールされます。</div>
+        </div>
+        <div class="field full">
+          <label>復習を入れるタイミング</label>
+          <div class="checkbox-row" id="intervalRow"></div>
+          <div class="hint">推奨：1日後・3日後・7日後・14日後。他教科との兼ね合いで負担が大きければ間引いてOKです。</div>
+        </div>
+      </div>
+      <div class="error-msg" id="errorMsg"></div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
+        <button class="btn-primary" id="addBtn">この範囲をスケジュールに追加</button>
+        <button class="btn-ghost" id="cancelEditBtn" style="display:none;">編集をキャンセル</button>
+      </div>
+      <div class="entry-list" id="entryList"></div>
+    </details>
+
+    <details class="setup-details-sub" id="scheduleDisplayDetails" open>
+      <summary class="setup-details-sub-summary">② スケジュール表（単語 + 参考書）</summary>
+      <div class="schedule-wrap">
+        <div id="scheduleArea"></div>
+      </div>
+    </details>
+
     <div class="footer-actions">
       <button class="btn-ghost" id="resetBtn">範囲をすべてリセット</button>
     </div>
