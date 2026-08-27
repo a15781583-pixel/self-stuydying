@@ -3,6 +3,7 @@ const LEECH_KEY = 'vocab-leech-words';
 const SCORE_KEY = 'vocab-score-records';
 const ANALYSIS_KEY = 'vocab-weakness-analysis';
 const DAILY_PROGRESS_KEY = 'vocab-daily-progress'; // 日別進捗記録
+const MONTH_GOAL_KEY = 'vocab-month-goal'; // 今月の目標
 const WEEKDAYS = ['日','月','火','水','木','金','土'];
 const DEFAULT_WEEKDAYS = [1,2,3,4,5,6];
 const DEFAULT_INTERVALS = [1,3,7,14];
@@ -1136,92 +1137,47 @@ function renderIntegratedSchedule() {
   }
 
   attachReviewCheckHandlers(container);
-
-  // 今日のサマリーカードを更新
-  updateTodaySummaryCard();
 }
 
-/* ---------- 今日のサマリーカード更新 ---------- */
-function updateTodaySummaryCard() {
-  const todayStr = todayISO();
-
-  // 日付表示
-  const dateEl = document.getElementById('todaySummaryDate');
-  if (dateEl) {
-    const d = new Date();
-    const weekLabel = ['日', '月', '火', '水', '木', '金', '土'][d.getDay()];
-    dateEl.textContent = `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日（${weekLabel}）`;
-  }
-
-  const {
-    vocabChunks,
-    refChunks,
-    vocabReviews,
-    refReviews
-  } = buildScheduleData();
-
-  // 今日の単語数（繰り越し含む）
-  const todayWords = vocabChunks.filter(c => c.date.startsWith(todayStr));
-  let totalWords = 0;
-  todayWords.forEach(w => { totalWords += w.rangeEnd - w.rangeStart + 1; });
-
-  // 今日の参考書ページ数（繰り越し含む）
-  const todayBooks = refChunks.filter(c => c.date.startsWith(todayStr));
-  let totalPages = 0;
-  todayBooks.forEach(b => { totalPages += b.rangeEnd - b.rangeStart + 1; });
-
-  // 今日の未完了復習件数
-  const todayWordReviews = vocabReviews.filter(r => r.date.startsWith(todayStr) && !r.done);
-  const todayBookReviews = refReviews.filter(r => r.date.startsWith(todayStr) && !r.done);
-  const totalReviews = todayWordReviews.length + todayBookReviews.length;
-
-  const wordsEl = document.getElementById('ts-words');
-  const pagesEl = document.getElementById('ts-pages');
-  const reviewsEl = document.getElementById('ts-reviews');
-  const allDoneEl = document.getElementById('ts-all-done');
-
-  const hasAnyTask = (todayWords.length > 0 || todayBooks.length > 0 || vocabReviews.filter(r => r.date.startsWith(todayStr)).length > 0 || refReviews.filter(r => r.date.startsWith(todayStr)).length > 0);
-
-  if (wordsEl) wordsEl.innerHTML = totalWords > 0 ? `${totalWords}<span class="ts-unit">語</span>` : `—<span class="ts-unit">語</span>`;
-  if (pagesEl) pagesEl.innerHTML = totalPages > 0 ? `${totalPages}<span class="ts-unit">ページ</span>` : `—<span class="ts-unit">ページ</span>`;
-  if (reviewsEl) reviewsEl.innerHTML = `${totalReviews}<span class="ts-unit">件</span>`;
-
-  // 全完了バナー
-  if (allDoneEl) {
-    // 新規単語タスクの完了チェック：各チャンクに対して actualEnd >= rangeEnd の進捗記録が存在するか
-    const allWordsDone = todayWords.every(c => {
-      // 繰越チャンクは originalDate でキーを揃える（buildProgressInputSection と統一）
-      const chunkDate = c.carriedForward ? (c.originalDate || c.date) : c.date;
-      const chunkKey  = `${c.entryId}_${chunkDate}_${c.rangeStart}`;
-      return dailyProgress.some(p => {
-        if (p.type !== 'word') return false;
-        // 新形式（originEntryId が存在する）は複合キーで完全一致のみ
-        const matched = p.originEntryId != null
-          ? p.entryId === chunkKey
-          : p.date === c.date && p.entryId === c.entryId;
-        return matched && p.actualEnd >= c.rangeEnd;
-      });
-    });
-    // 新規参考書タスクの完了チェック：各チャンクに対して actualEnd >= rangeEnd の進捗記録が存在するか
-    const allBooksDone = todayBooks.every(c => {
-      // 繰越チャンクは originalDate でキーを揃える（buildProgressInputSection と統一）
-      const chunkDate = c.carriedForward ? (c.originalDate || c.date) : c.date;
-      const chunkKey  = `${c.planId}_${chunkDate}_${c.rangeStart}`;
-      return dailyProgress.some(p => {
-        if (p.type !== 'book') return false;
-        // 新形式（planId が entryId と異なる = entryId が複合キー）は完全一致のみ
-        const matched = (p.planId && p.planId !== p.entryId)
-          ? p.entryId === chunkKey
-          : p.date === c.date && (p.planId || p.entryId) === c.planId;
-        return matched && p.actualEnd >= c.rangeEnd;
-      });
-    });
-    // 新規タスクがある場合はすべて完了済みであること、ない場合はスルー
-    const allNewTasksDone = (todayWords.length === 0 || allWordsDone) &&
-                            (todayBooks.length === 0 || allBooksDone);
-    const allReviewsDone = totalReviews === 0 && hasAnyTask && allNewTasksDone;
-    allDoneEl.style.display = allReviewsDone ? 'block' : 'none';
-  }
+/* ---------- 月目標カード ---------- */
+function loadMonthGoal() {
+  return loadFromStorage(MONTH_GOAL_KEY, { text: '' });
+}
+function saveMonthGoal(text) {
+  saveToStorage(MONTH_GOAL_KEY, { text });
+}
+function renderMonthGoalCard() {
+  const displayEl = document.getElementById('monthGoalDisplay');
+  const inputEl = document.getElementById('monthGoalInput');
+  if (!displayEl) return;
+  const goal = loadMonthGoal();
+  const text = (goal && goal.text) ? goal.text.trim() : '';
+  displayEl.textContent = text ? text : '目標が設定されていません。「編集」から入力してください。';
+  if (inputEl) inputEl.value = text;
+}
+function openMonthGoalEditor() {
+  const displayEl = document.getElementById('monthGoalDisplay');
+  const editArea = document.getElementById('monthGoalEditArea');
+  const inputEl = document.getElementById('monthGoalInput');
+  if (!editArea) return;
+  const goal = loadMonthGoal();
+  if (inputEl) inputEl.value = (goal && goal.text) ? goal.text : '';
+  if (displayEl) displayEl.style.display = 'none';
+  editArea.style.display = 'block';
+  if (inputEl) inputEl.focus();
+}
+function closeMonthGoalEditor() {
+  const displayEl = document.getElementById('monthGoalDisplay');
+  const editArea = document.getElementById('monthGoalEditArea');
+  if (editArea) editArea.style.display = 'none';
+  if (displayEl) displayEl.style.display = 'block';
+}
+function handleMonthGoalSave() {
+  const inputEl = document.getElementById('monthGoalInput');
+  const text = inputEl ? inputEl.value.trim() : '';
+  saveMonthGoal(text);
+  renderMonthGoalCard();
+  closeMonthGoalEditor();
 }
 
 /* ---------- 進捗入力 UI ---------- */
@@ -2775,7 +2731,10 @@ function showTab(tabName) {
   renderAll();
   loadRefEntries(); // 参考書データを先に読み込む（DOMContentLoadedから移動）
   renderIntegratedSchedule(); // 「スケジュール」タブは初期表示タブなので、読み込み直後に描画する
-  updateTodaySummaryCard();   // 今日のサマリーカードを初期表示
+  renderMonthGoalCard();      // 月目標カードを初期表示
+  document.getElementById('monthGoalEditBtn')?.addEventListener('click', openMonthGoalEditor);
+  document.getElementById('monthGoalSaveBtn')?.addEventListener('click', handleMonthGoalSave);
+  document.getElementById('monthGoalCancelBtn')?.addEventListener('click', closeMonthGoalEditor);
   await loadLeech();
   renderLeech();
 
