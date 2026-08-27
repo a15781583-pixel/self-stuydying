@@ -96,15 +96,6 @@
   </div>
 
   <div id="tab-study" class="tab-content" style="display:none;">
-  <section class="card today-card" id="today">
-    <h2>📌 今日やること</h2>
-    <h3 class="sub-head">今日の範囲</h3>
-    <div class="today-new-box" id="todayNewBox"></div>
-    <h3 class="sub-head">レビューする単語</h3>
-    <div class="due-list" id="dueList"></div>
-  </section>
-
-
   <details class="setup-details" id="setup" open>
     <summary>⚙️ スケジュール設定</summary>
 
@@ -155,11 +146,6 @@
           <label>学習する曜日（新規を覚える日）</label>
           <div class="checkbox-row" id="weekdayRow"></div>
         </div>
-        <div class="field full" id="reviewWeekdayWrap">
-          <label>復習を行う曜日（復習タスクが割り当てられる曜日）</label>
-          <div class="checkbox-row" id="reviewWeekdayRow"></div>
-          <div class="hint">例：日・水・土など。インターバル日数（1・3・7・14日後）の後、最初に一致する曜日に復習がスケジュールされます。</div>
-        </div>
         <div class="field full">
           <label>復習を入れるタイミング</label>
           <div class="checkbox-row" id="intervalRow"></div>
@@ -170,154 +156,121 @@
       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
         <button class="btn-primary" id="addBtn">この範囲をスケジュールに追加</button>
         <button class="btn-ghost" id="cancelEditBtn" style="display:none;">編集をキャンセル</button>
+        <button class="btn-ghost" id="resetBtn">登録した範囲をすべて削除</button>
       </div>
       <div class="entry-list" id="entryList"></div>
     </details>
 
-    <details class="setup-details-sub" id="scheduleDisplayDetails" open>
-      <summary class="setup-details-sub-summary">② スケジュール表（単語 + 参考書）</summary>
-      <div class="schedule-wrap">
-        <div id="scheduleArea"></div>
+    <details class="setup-details-sub" id="leechDetails" open>
+      <summary class="setup-details-sub-summary">② 苦手単語チェック・単語テスト</summary>
+
+      <div class="field full" style="margin-bottom:14px;">
+        <label>苦手単語を登録</label>
+        <div class="form-grid">
+          <div class="field">
+            <label for="leechWord">単語</label>
+            <input type="text" id="leechWord" placeholder="例: procrastinate">
+          </div>
+          <div class="field">
+            <label for="leechMeaning">意味（任意）</label>
+            <input type="text" id="leechMeaning" placeholder="例: 先延ばしにする">
+          </div>
+        </div>
+        <div class="error-msg" id="leechErrorMsg"></div>
+        <button class="btn-primary" id="leechAddBtn" style="margin-top:10px;">苦手単語を登録</button>
       </div>
-    </details>
 
-    <div class="footer-actions">
-      <button class="btn-ghost" id="resetBtn">範囲をすべてリセット</button>
-    </div>
-  </details>
+      <h3 class="sub-head">今日レビューする単語</h3>
+      <div id="dueList" style="display:flex; flex-direction:column; gap:10px; margin-bottom:20px;"></div>
 
-  <details class="setup-details" id="leechSetup">
-    <summary>🔤 苦手単語欄（単語登録・確認テスト）</summary>
-    <h3 class="sub-head">③ 単語を登録（問題中に出てきた単語や苦手な単語など）</h3>
-    <div class="leech-form-row">
-      <input type="text" id="leechWord" placeholder="単語（例: arbitrary）">
-      <input type="text" id="leechMeaning" placeholder="意味・メモ（任意）">
-      <button class="btn-primary" id="leechAddBtn">リストに追加</button>
-    </div>
-    <div class="error-msg" id="leechErrorMsg"></div>
-
-    <details class="leech-details" open>
-      <summary id="activeSummary">登録中の単語</summary>
-      <div style="margin: 12px 0; padding: 14px; background: var(--paper); border-radius: 8px; border: 1px solid var(--paper-line);">
-        <div style="font-size: .85rem; font-weight: 700; margin-bottom: 8px;">📝 リストの単語で確認テストを実施</div>
-        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-          <select id="testMode" style="padding: 8px 10px; border: 1px solid var(--paper-line); border-radius: 6px; font-family: inherit; font-size: .9rem;">
-            <option value="all">登録中の全単語</option>
-            <option value="random10">ランダムに10問</option>
-            <option value="miss1">ミス1回の単語のみ</option>
-            <option value="warn">要注意単語のみ（ミス2回以上）</option>
+      <div class="field full" style="margin-bottom:14px;">
+        <label>単語テストを開始</label>
+        <div style="display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap; margin-top:6px;">
+          <select id="testMode" style="flex:1; min-width:200px; padding:8px; border:1px solid var(--paper-line); border-radius:6px; font-family:inherit;">
+            <option value="all">登録中の苦手単語すべて</option>
+            <option value="warn">要注意の単語のみ</option>
+            <option value="random10">ランダム10問</option>
+            <option value="miss1">ミス1回の単語</option>
           </select>
-          <button class="btn-primary" id="startTestBtn">テスト開始</button>
+          <button class="btn-primary" id="startTestBtn">▶ テストを開始</button>
         </div>
       </div>
-      <table class="leech-mini-table" id="activeTable"></table>
+
+      <h3 class="sub-head" id="activeSummary">登録中の苦手単語</h3>
+      <div class="schedule-wrap">
+        <table class="schedule-table" id="activeTable"></table>
+      </div>
+
+      <h3 class="sub-head" id="graduatedSummary" style="margin-top:16px;">卒業した単語</h3>
+      <div class="schedule-wrap">
+        <table class="schedule-table" id="graduatedTable"></table>
+      </div>
     </details>
-    <details class="leech-details">
-      <summary id="graduatedSummary">卒業した単語</summary>
-      <table class="leech-mini-table" id="graduatedTable"></table>
-    </details>
+
   </details>
-
-  <section class="card tip-box" style="background:var(--gold-bg); border:1px solid #e4cd94;">
-    <h2 style="font-family:'Noto Sans JP',sans-serif; font-size:.95rem;">📌 各回の学習フロー（既にやっている進め方）</h2>
-    <ol style="margin:8px 0 0 0; padding-left:1.2em; font-size:.85rem;">
-      <li style="margin-bottom:4px;">英語を見て日本語の意味を思い出す（想起）</li>
-      <li style="margin-bottom:4px;">出てこなければ意味を確認 → 右ページの例文で該当箇所を訳す</li>
-      <li style="margin-bottom:4px;"><b>例文を見終えたら、単語だけをもう一度見せて自力で意味を言わせる</b>（ここが抜けやすい）</li>
-      <li style="margin-bottom:4px;">それでも詰まる単語は上の「苦手リスト」に単語だけ登録しておく → 表示された日に自動でレビュー対象に上がってくる</li>
-    </ol>
-  </section>
   </div>
-  
-    <!-- 参考書スケジュール管理タブ -->
-  <div id="tab-reference" class="tab-content" style="display: none;">
 
-    <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-         【出力エリア】今日の確認
-         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
-    <div class="ref-section-label ref-section-label--output">
-      <span class="ref-section-icon">📋</span>今日の確認
-    </div>
+  <!-- 参考書学習タブ -->
+  <div id="tab-reference" class="tab-content" style="display:none;">
+    <details class="setup-details" id="refSetup" open>
+      <summary>⚙️ スケジュール設定</summary>
 
-    <!-- ★ 今日やること（参考書）カード -->
-    <section class="card today-card" id="ref-today">
-      <h2>📌 今日やること</h2>
+      <details class="setup-details-sub" id="refSettingDetails" open>
+        <summary class="setup-details-sub-summary">参考書を登録</summary>
 
-      <h3 class="sub-head">今日の参考書範囲</h3>
-      <div class="today-new-box" id="refTodayNewBox">
-        <div class="empty-mini">読み込み中...</div>
-      </div>
+        <div class="ref-setting-body" style="display: flex; flex-direction: column; gap: 20px;">
 
-      <h3 class="sub-head">今日の復習チェック</h3>
-      <div id="refTodayReviewList">
-        <div class="empty-mini">読み込み中...</div>
-      </div>
-
-
-    </section>
-
-    <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-         【入力エリア】スケジュール設定
-         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
-    <div class="ref-section-label ref-section-label--input">
-      <span class="ref-section-icon">⚙️</span>スケジュール設定
-    </div>
-
-    <details class="ref-setting-details" id="refSettingDetails" open>
-      <summary class="ref-setting-summary">
-        📚 参考書スケジュールを登録・管理する
-      </summary>
-      <div class="card ref-setting-body">
-
-        <div class="field full" style="margin-bottom:14px;">
-          <label>割り振り方法</label>
-          <div style="display:flex; gap:16px; margin-top:6px; flex-wrap:wrap;">
-            <label style="cursor:pointer; display:flex; align-items:center; gap:4px; font-size:.85rem;">
-              <input type="radio" name="refPlanMode" value="byRange" checked>
-              学習する曜日から設定（開始日〜終了日で均等に分ける）
-            </label>
-            <label style="cursor:pointer; display:flex; align-items:center; gap:4px; font-size:.85rem;">
-              <input type="radio" name="refPlanMode" value="byAmount">
-              1日あたり進める量から設定（終了日は自動計算）
-            </label>
+          <div class="field full">
+            <label for="refBookName">参考書名 <span style="color:var(--margin-red)">*</span></label>
+            <input type="text" id="refBookName" class="input-field" placeholder="例: 二次試験対策・総合的研究化学" style="width: 100%;">
           </div>
-        </div>
 
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 15px;">
-          <div>
-            <label>教材名</label>
-            <input type="text" id="refBookName" placeholder="例: 青チャート、NextStage" class="input-field" style="width: 100%;">
+          <div class="field full" style="margin-bottom: 14px;">
+            <label>割り振り方法</label>
+            <div style="display:flex; gap:16px; margin-top:6px; flex-wrap:wrap;">
+              <label style="cursor:pointer; display:flex; align-items:center; gap:4px; font-size:.85rem;">
+                <input type="radio" name="refPlanMode" value="byRange" checked>
+                学習する曜日から設定（開始日〜終了日で均等に分ける）
+              </label>
+              <label style="cursor:pointer; display:flex; align-items:center; gap:4px; font-size:.85rem;">
+                <input type="radio" name="refPlanMode" value="byAmount">
+                1日の進める量を指定する（終了ページまで数週間続く）
+              </label>
+            </div>
           </div>
-          <div>
-            <label>開始ページ（番）</label>
-            <input type="number" id="refStartNum" placeholder="例: 1" class="input-field" style="width: 100%;">
+
+          <div class="form-grid" style="gap: 12px;">
+            <div class="field">
+              <label for="refStartPage">開始ページ</label>
+              <input type="number" id="refStartPage" class="input-field" min="1" placeholder="例: 1" style="width: 100%;">
+            </div>
+            <div class="field">
+              <label for="refEndPage">終了ページ</label>
+              <input type="number" id="refEndPage" class="input-field" min="1" placeholder="例: 432" style="width: 100%;">
+            </div>
+            <div>
+              <label for="refStartDate">開始日</label>
+              <input type="date" id="refStartDate" class="input-field" style="width: 100%;">
+            </div>
+            <div id="refEndDateWrap">
+              <label>終了日</label>
+              <input type="date" id="refEndDate" class="input-field" style="width: 100%;">
+            </div>
+            <div id="refAmountFieldWrap" style="display: none;">
+              <label>1日あたり進める量</label>
+              <input type="number" id="refAmountPerDay" min="1" placeholder="例: 5" class="input-field" style="width: 100%;">
+            </div>
           </div>
-          <div>
-            <label>終了ページ（番）</label>
-            <input type="number" id="refEndNum" placeholder="例: 100" class="input-field" style="width: 100%;">
-          </div>
-          <div>
-            <label>開始日</label>
-            <input type="date" id="refStartDate" class="input-field" style="width: 100%;">
-          </div>
-          <div id="refEndDateWrap">
-            <label>終了日</label>
-            <input type="date" id="refEndDate" class="input-field" style="width: 100%;">
-          </div>
-          <div id="refAmountFieldWrap" style="display: none;">
-            <label>1日あたり進める量</label>
-            <input type="number" id="refAmountPerDay" min="1" placeholder="例: 5" class="input-field" style="width: 100%;">
-          </div>
-        </div>
 
         <div class="field full" style="margin-bottom: 15px;">
           <label>学習する曜日</label>
           <div class="checkbox-row" id="refWeekdayRow"></div>
         </div>
 
-        <div class="field full" id="refReviewWeekdayWrap" style="margin-bottom: 15px;">
-          <label>復習を行う曜日</label>
-          <div class="checkbox-row" id="refReviewWeekdayRow"></div>
+        <div class="field full" id="refIntervalWrap" style="margin-bottom: 15px;">
+          <label>復習を入れるタイミング</label>
+          <div class="checkbox-row" id="refIntervalRow"></div>
+          <div class="hint">推奨：1日後・3日後・7日後・14日後。他教科との兼ね合いで負担が大きければ間引いてOKです。</div>
         </div>
 
         <div class="error-msg" id="refErrorMsg"></div>
@@ -338,40 +291,31 @@
       <h2>🤖 AI学習プランナー</h2>
 
       <!-- APIキー入力（両AIタブで共通使用） -->
-      <div class="field" style="margin-bottom:16px;">
-        <label for="geminiApiKey">Gemini APIキー</label>
-        <input type="password" id="geminiApiKey" placeholder="AIzaSy..."
-              style="width:100%; font-family:monospace; box-sizing:border-box;">
-        <div class="hint" style="margin-top:4px;">
-          入力後、自動的に保存されます。Google AI Studio（<a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" style="color: var(--ink-soft); text-decoration: underline;">取得はこちらから</a>）で発行可能です。
+      <details class="setup-details" id="apiKeyDetails" open>
+        <summary>🔑 APIキーを設定</summary>
+        <div style="margin-top: 12px;">
+          <p style="font-size:.85rem; color:var(--ink-soft); margin-bottom:10px;">
+            GoogleのGemini APIキーを入力してください。<a href="https://ai.google.dev/tutorials/setup" target="_blank" style="color:var(--accent);">キー取得はこちら</a>
+          </p>
+          <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+            <input type="password" id="apiKeyInput" placeholder="Gemini API Key" style="flex:1; min-width:250px; padding:8px; border:1px solid var(--paper-line); border-radius:6px; font-family:monospace;">
+            <button id="apiKeySaveBtn" class="btn-primary">保存</button>
+          </div>
+          <div id="apiKeyStatus" style="font-size:.85rem; color:var(--ink-soft);"></div>
         </div>
-      </div>
+      </details>
 
-      <div class="error-msg" id="coachErrorMsg"></div>
-
-      <!-- チャットセクション -->
+      <!-- チャット領域 -->
       <div id="coachChatSection">
-        <div id="chatBox" class="chat-box" style="
-          border:1px solid var(--paper-line);
-          border-radius:8px;
-          min-height:200px;
-          max-height:400px;
-          overflow-y:auto;
-          padding:12px;
-          margin-bottom:10px;
-          background:var(--paper);
-          display:flex;
-          flex-direction:column;
-          gap:8px;">
-          <div class="chat-msg model-msg">こんにちは！目標と現在の状況を教えてください！</div>
+        <div class="field full" style="margin-top:16px; margin-bottom:10px;">
+          <h3 class="sub-head">学習プラン相談</h3>
+          <p style="font-size:.9rem; color:var(--ink-soft); line-height:1.6;">
+            学習目標、現状、困っていることなどを入力してください。AIが最適な学習ロードマップを提案します。
+          </p>
         </div>
 
-        <!-- 画像プレビュー -->
-        <div id="imagePreviewContainer" style="display:none; margin:6px 0; display:none;">
-          <img id="imagePreview" src="" alt="添付画像プレビュー"
-               style="max-height:120px; border-radius:8px; display:block;">
-          <button id="clearImageBtn" class="btn-ghost"
-                  style="margin-top:4px; font-size:.8rem; padding:4px 10px;">✕ 画像を削除</button>
+        <div class="chat-area" id="coachChatArea"
+             style="border:1px solid var(--paper-line); border-radius:8px; padding:12px; height:300px; overflow-y:auto; background:var(--paper); margin-bottom:12px; font-size:.85rem;">
         </div>
 
         <div style="display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;">
