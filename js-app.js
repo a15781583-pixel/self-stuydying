@@ -121,29 +121,6 @@ function parseISO(s){ const [y,m,d] = s.split('-').map(Number); return new Date(
 function addDays(d, n){ const nd = new Date(d); nd.setDate(nd.getDate()+n); return nd; }
 function todayISO(){ return formatISO(new Date()); }
 
-/**
- * fromDate から intervalDays 日後以降で、
- * reviewWeekdays に一致する最初の日付を返す。
- * reviewWeekdays が空なら従来通り固定日数で返す。
- * @param {string} fromDate        - 'YYYY-MM-DD' 形式の起点日
- * @param {number} intervalDays    - 加算する日数（DEFAULT_INTERVALS の値）
- * @param {number[]} reviewWeekdays - 許可する曜日の配列（0=日〜6=土）
- * @returns {string} 'YYYY-MM-DD' 形式の復習日
- */
-function findNextReviewWeekday(fromDate, intervalDays, reviewWeekdays) {
-  const base = addDays(parseISO(fromDate), intervalDays);
-  if (!reviewWeekdays || reviewWeekdays.length === 0) {
-    return formatISO(base); // フォールバック：従来動作
-  }
-  for (let i = 0; i < 7; i++) {
-    const candidate = addDays(base, i);
-    if (reviewWeekdays.includes(candidate.getDay())) {
-      return formatISO(candidate);
-    }
-  }
-  return formatISO(base); // 念のためフォールバック
-}
-
 /* ---------- 復習の完了チェック／遅れた分だけ1日ずつずらすロジック ---------- */
 
 // 復習項目1件ごとに一意なキーを作る（単語range／参考書rangeごと・間隔日数ごとに固定）
@@ -159,10 +136,10 @@ function saveReviewDone(){
 }
 
 // 本来の復習予定日(originalIso)と完了状態から、「実際に表示すべき復習日」を求める。
-// ルール：予定日を過ぎてもクリアしていない項目は、次の復習曜日（reviewWeekdays 指定がなければ今日）に移動する。
+// ルール：予定日を過ぎてもクリアしていない項目は「今日」に移動する。
 // 移動先の日付をキーに埋め込んだ movedKey を返すことで、移動のたびにチェック状態がリセットされる。
 // 予定日が来ていない、またはすでにクリア済みの項目はずらさない。
-function computeEffectiveReviewDate(originalIso, key, reviewWeekdays){
+function computeEffectiveReviewDate(originalIso, key){
   // 【バグ2修正】進捗パネル(dailyProgress)に完了記録があるかチェック
   // reviewDoneSet はカレンダーのチェックボックス経由でのみ更新されるため、
   // パネルから完了させた場合に done: true にならないケースに対応する。
@@ -194,10 +171,8 @@ function computeEffectiveReviewDate(originalIso, key, reviewWeekdays){
     return { date: originalIso, delayedDays: 0, done: false };
   }
 
-  // ★ 遅れた場合：次の復習曜日に移動（reviewWeekdays 未指定時は今日）
-  const newDate = reviewWeekdays && reviewWeekdays.length > 0
-    ? findNextReviewWeekday(originalIso, diffDays, reviewWeekdays)
-    : todayIso;
+  // ★ 遅れた場合：今日の日付に移動
+  const newDate = todayIso;
 
   // ★ 移動先の日付をキーに埋め込むことで、移動毎にチェック状態をリセット
   const movedKey = `${key}_moved_${newDate}`;
@@ -209,16 +184,15 @@ function computeEffectiveReviewDate(originalIso, key, reviewWeekdays){
 // chunks  : フィルタ済みチャンク配列
 // prefix  : キー接頭辞（'w' or 'r'）
 // getOwnerId  : chunk → ownerID（entryId or planId）
-// getWeekdays : chunk → reviewWeekdays 配列
 // getIntervals: chunk → インターバル日数配列
 // extraFields : chunk → pushするオブジェクトに追加するフィールド
-function buildReviewsFromChunks(chunks, prefix, getOwnerId, getWeekdays, getIntervals, extraFields) {
+function buildReviewsFromChunks(chunks, prefix, getOwnerId, getIntervals, extraFields) {
   const raw = [];
   chunks.forEach(c => {
     (getIntervals(c) || []).forEach(n => {
       const originalDate = formatISO(addDays(parseISO(c.date), n));
       const key = buildReviewKey(prefix, getOwnerId(c), c.rangeStart, c.rangeEnd, n);
-      const eff = computeEffectiveReviewDate(originalDate, key, getWeekdays(c));
+      const eff = computeEffectiveReviewDate(originalDate, key);
       raw.push({ date: eff.date, originalDate, rangeStart: c.rangeStart, rangeEnd: c.rangeEnd,
         interval: n, key: eff.movedKey ?? key, delayedDays: eff.delayedDays, done: eff.done,
         ...extraFields(c) });
@@ -240,11 +214,10 @@ function buildProgressReviews(progressItems, prefix, getResolved, getEntity, get
     const resolved = getResolved(p);
     const entity = getEntity(resolved);
     if (!entity) return;
-    const reviewWeekdays = entity.reviewWeekdays || [];
     (getIntervals(entity) || []).forEach(n => {
-      const originalDate = findNextReviewWeekday(p.date, n, reviewWeekdays);
+      const originalDate = formatISO(addDays(parseISO(p.date), n));
       const key = `${prefix}_prog_${resolved}_${p.date}_${p.plannedStart}_${n}`;
-      const eff = computeEffectiveReviewDate(originalDate, key, reviewWeekdays);
+      const eff = computeEffectiveReviewDate(originalDate, key);
       raw.push({
         date: eff.date, originalDate, rangeStart: p.plannedStart, rangeEnd: p.actualEnd,
         interval: n, key: eff.movedKey ?? key, delayedDays: eff.delayedDays, done: eff.done,
@@ -282,7 +255,6 @@ function buildAllReviews(){
     ...buildReviewsFromChunks(
       filteredVocabChunks, 'w',
       c => c.entryId,
-      c => entries.find(e => e.id === c.entryId)?.reviewWeekdays || [],
       c => c.intervals,
       c => ({ entryId: c.entryId, bookName: c.bookName })
     ),
@@ -316,7 +288,6 @@ function buildAllReviews(){
     ...buildReviewsFromChunks(
       filteredRefChunks, 'r',
       c => c.planId,
-      c => refEntries.find(r => r.id === c.planId)?.reviewWeekdays || [],
       c => (c.intervals && c.intervals.length ? c.intervals : DEFAULT_INTERVALS),
       c => ({ bookName: c.bookName, planId: c.planId })
     ),
@@ -417,12 +388,12 @@ function isReviewFromOriginalSchedule(review, cfChunk, type) {
 }
 
 
-function addReviewsFromCf(cfList, prefix, filteredReviews, getOwnerId, getWeekdays, getIntervals, extraFields) {
+function addReviewsFromCf(cfList, prefix, filteredReviews, getOwnerId, getIntervals, extraFields) {
   cfList.forEach(c => {
     (getIntervals(c) || []).forEach(n => {
       const originalDate = formatISO(addDays(parseISO(c.date), n));
       const key = buildReviewKey(prefix, getOwnerId(c), c.rangeStart, c.rangeEnd, n);
-      const eff = computeEffectiveReviewDate(originalDate, key, getWeekdays(c));
+      const eff = computeEffectiveReviewDate(originalDate, key);
       filteredReviews.push({ date: eff.date, originalDate, rangeStart: c.rangeStart, rangeEnd: c.rangeEnd,
         interval: n, key: eff.movedKey ?? key, delayedDays: eff.delayedDays, done: eff.done,
         ...extraFields(c) });
@@ -441,7 +412,6 @@ function adjustReviewsForCarryForward(vocabReviews, refReviews, cfVocab, cfRef) 
 
   addReviewsFromCf(cfVocab, 'w', filteredVocabReviews,
     c => c.entryId,
-    c => entries.find(e => e.id === c.entryId)?.reviewWeekdays || [],
     c => c.intervals,
     c => ({ entryId: c.entryId, bookName: c.bookName })
   );
@@ -449,7 +419,6 @@ function adjustReviewsForCarryForward(vocabReviews, refReviews, cfVocab, cfRef) 
   // ★ 修正：cfRef の繰越チャンクから新しい日付基準で復習を再生成（単語の cfVocab と対称）
   addReviewsFromCf(cfRef, 'r', filteredRefReviews,
     c => c.planId,
-    c => refEntries.find(r => r.id === c.planId)?.reviewWeekdays || [],
     c => (c.intervals && c.intervals.length ? c.intervals : DEFAULT_INTERVALS),
     c => ({ bookName: c.bookName, planId: c.planId })
   );
@@ -2168,7 +2137,7 @@ async function handleAdd(){
     exitEntryEditMode();
   } else {
     // entryオブジェクトに endDate を追加
-    entries.push({ id: 'e' + Date.now(), bookName, startNum, endNum, startDate, endDate, weekdays, intervals, planMode, amountPerDay });
+    entries.push({ id: genId('e_'), bookName, startNum, endNum, startDate, endDate, weekdays, intervals, planMode, amountPerDay });
   }
   await saveEntries();
   renderAll();
@@ -2791,8 +2760,7 @@ function showTab(tabName) {
 window.addEventListener('DOMContentLoaded', () => {
   const refStartDateInput = document.getElementById('refStartDate');
   if(refStartDateInput) {
-    const today = new Date();
-    refStartDateInput.value = today.toISOString().split('T')[0];
+    refStartDateInput.value = todayISO();
   }
 
   // 学習する曜日のチップを生成（単語スケジュールと同じ仕組みを再利用）
@@ -2891,7 +2859,7 @@ window.addEventListener('DOMContentLoaded', () => {
         refEntries = refEntries.map(p => p.id === editingRefEntryId ? newPlan : p);
         exitRefEditMode();
       } else {
-        newPlan.id = 'ref_' + Date.now();
+        newPlan.id = genId('ref_');
         refEntries.push(newPlan);
       }
       saveRefEntries();
