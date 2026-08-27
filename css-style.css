@@ -435,6 +435,24 @@
   details.setup-details > summary::before{ content:"▸ "; }
   details.setup-details[open] > summary::before{ content:"▾ "; }
 
+  /* ---------- setup-details 内の子折りたたみ（①範囲登録 / ②スケジュール表示） ---------- */
+  /* 単語・参考書で共通化した設計：長くなりがちな登録フォームとスケジュール表を
+     それぞれ独立して開閉できるようにし、見やすさを確保する。 */
+  details.setup-details-sub{
+    margin:20px 0 8px 0;
+    border-top:1px dashed var(--paper-line);
+    padding-top:16px;
+  }
+  details.setup-details-sub:first-of-type{ border-top:none; padding-top:0; margin-top:4px; }
+  details.setup-details-sub > .setup-details-sub-summary{
+    cursor:pointer; list-style:none;
+    font-size:.9rem; font-weight:700; color:var(--ink-soft);
+    margin-bottom:8px;
+  }
+  details.setup-details-sub > .setup-details-sub-summary::-webkit-details-marker{ display:none; }
+  details.setup-details-sub > .setup-details-sub-summary::before{ content:"▸ "; }
+  details.setup-details-sub[open] > .setup-details-sub-summary::before{ content:"▾ "; }
+
   /* （旧モバイル専用トグルは schedule-details に統合済み） */
 
   /* ============================================================
