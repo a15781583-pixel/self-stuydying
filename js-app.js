@@ -44,6 +44,17 @@ function saveToStorage(key, data) {
 }
 // ──────────────────────────────────────────────────────────────
 
+// ── ID生成ヘルパー ────────────────────────────────────────────
+// crypto.randomUUID() はセキュアコンテキスト（HTTPS または localhost）でのみ
+// 利用可能なため、HTTP環境や file:// で開いた場合は関数自体が存在せず
+// 例外が発生する。利用可能なら randomUUID を使い、そうでなければ
+// タイムスタンプ + ランダム文字列によるフォールバックでIDを生成する。
+function genId(prefix){
+  if (crypto?.randomUUID) return prefix + crypto.randomUUID();
+  return prefix + Date.now() + '_' + Math.random().toString(36).slice(2);
+}
+// ──────────────────────────────────────────────────────────────
+
 // ── 復習インターバルの階層スタイルを返すヘルパー ──────────────
 function getIntervalTier(interval) {
   if (interval <= 1) return 1;
@@ -306,7 +317,7 @@ function buildAllReviews(){
       filteredRefChunks, 'r',
       c => c.planId,
       c => refEntries.find(r => r.id === c.planId)?.reviewWeekdays || [],
-      () => DEFAULT_INTERVALS,
+      c => (c.intervals && c.intervals.length ? c.intervals : DEFAULT_INTERVALS),
       c => ({ bookName: c.bookName, planId: c.planId })
     ),
     ...buildProgressReviews(
@@ -314,7 +325,7 @@ function buildAllReviews(){
       'r',
       p => p.planId || p.entryId,
       id => refEntries.find(r => r.id === id),
-      () => DEFAULT_INTERVALS,
+      entity => (entity.intervals && entity.intervals.length ? entity.intervals : DEFAULT_INTERVALS),
       (p, resolved, entity) => ({ bookName: entity.bookName, planId: resolved })
     ),
   ];
@@ -439,7 +450,7 @@ function adjustReviewsForCarryForward(vocabReviews, refReviews, cfVocab, cfRef) 
   addReviewsFromCf(cfRef, 'r', filteredRefReviews,
     c => c.planId,
     c => refEntries.find(r => r.id === c.planId)?.reviewWeekdays || [],
-    () => DEFAULT_INTERVALS,
+    c => (c.intervals && c.intervals.length ? c.intervals : DEFAULT_INTERVALS),
     c => ({ bookName: c.bookName, planId: c.planId })
   );
 
@@ -549,8 +560,8 @@ const MATERIAL_CONFIGS = {
       !p.notProgressed &&
       (p.planId === materialId || p.entryId === materialId)
     ),
-    // チャンクに付与する種別固有のフィールド（planId のみ）
-    chunkIdFields: (material) => ({ planId: material.id }),
+    // チャンクに付与する種別固有のフィールド（planId + intervals）
+    chunkIdFields: (material) => ({ planId: material.id, intervals: material.intervals }),
   },
 };
 
@@ -1709,7 +1720,7 @@ function handleProgressSave(dateStr, baseId) {
         p => !(p.date === dateStr && p.reviewKey === reviewKey && p.type === type)
       );
       const record = {
-        id: 'dp_' + crypto.randomUUID(),
+        id: genId('dp_'),
         date: dateStr,
         reviewKey,
         type,
@@ -1766,7 +1777,7 @@ function handleProgressSave(dateStr, baseId) {
         p => !(p.date === dateStr && p.entryId === entryId && p.type === type)
       );
       const record = {
-        id: 'dp_' + crypto.randomUUID(),
+        id: genId('dp_'),
         date: dateStr,
         entryId,
         originEntryId: type === 'word' ? originEntryId : undefined, // ★ word: 元の entry.id を別途保存
@@ -2035,7 +2046,6 @@ function getPlanFormState(){
     endDate: document.getElementById('endDate').value,
     amountPerDay: document.getElementById('amountPerDay').value,
     weekdays: getCheckedValues('weekdayRow'),
-    reviewWeekdays: getCheckedValues('reviewWeekdayRow'),
     intervals: getCheckedValues('intervalRow'),
   };
 }
@@ -2056,7 +2066,6 @@ function setPlanFormState(state){
   document.getElementById('endDate').value = state.endDate ?? '';
   document.getElementById('amountPerDay').value = state.amountPerDay ?? '';
   setCheckedValues('weekdayRow', state.weekdays || []);
-  setCheckedValues('reviewWeekdayRow', state.reviewWeekdays || []);
   setCheckedValues('intervalRow', state.intervals || []);
 }
 
@@ -2077,7 +2086,6 @@ function startEditEntry(id){
     endDate: entry.endDate,
     amountPerDay: entry.amountPerDay,
     weekdays: entry.weekdays,
-    reviewWeekdays: entry.reviewWeekdays,
     intervals: entry.intervals,
   });
 
@@ -2127,7 +2135,6 @@ async function handleAdd(){
   const startDate = document.getElementById('startDate').value;
   const endDate = document.getElementById('endDate').value; // 追加
   const weekdays = getCheckedValues('weekdayRow');
-  const reviewWeekdays = getCheckedValues('reviewWeekdayRow'); // ★復習曜日を取得
   const intervals = getCheckedValues('intervalRow');
   const errorEl = document.getElementById('errorMsg');
   const planMode = document.querySelector('input[name="planMode"]:checked').value;
@@ -2156,12 +2163,12 @@ async function handleAdd(){
     // 編集モード：IDを維持したまま内容だけ差し替える
     // （IDを変えると復習履歴・進捗記録との紐付けが切れてしまうため）
     entries = entries.map(e => e.id === editingEntryId
-      ? { ...e, bookName, startNum, endNum, startDate, endDate, weekdays, reviewWeekdays, intervals, planMode, amountPerDay }
+      ? { ...e, bookName, startNum, endNum, startDate, endDate, weekdays, intervals, planMode, amountPerDay }
       : e);
     exitEntryEditMode();
   } else {
-    // entryオブジェクトに endDate と reviewWeekdays を追加
-    entries.push({ id: 'e' + Date.now(), bookName, startNum, endNum, startDate, endDate, weekdays, reviewWeekdays, intervals, planMode, amountPerDay });
+    // entryオブジェクトに endDate を追加
+    entries.push({ id: 'e' + Date.now(), bookName, startNum, endNum, startDate, endDate, weekdays, intervals, planMode, amountPerDay });
   }
   await saveEntries();
   renderAll();
@@ -2198,7 +2205,7 @@ async function handleLeechAdd(){
   const meaning = meaningEl.value.trim();
   if(!word){ errorEl.textContent = '単語を入力してください。'; return; }
   leechWords.push({
-    id: 'w_' + crypto.randomUUID(), word, meaning, stepIndex: 0,
+    id: genId('w_'), word, meaning, stepIndex: 0,
     nextReviewDate: nextDateForStep(0), missCount: 0, status: 'active'
   });
   await saveLeech();
@@ -2239,16 +2246,16 @@ async function handleLeechDelete(id){
 }
 
 function renderLeech(){
-  const dueList        = document.getElementById('dueList');
-  const activeSummary  = document.getElementById('activeSummary');
-  const activeTable    = document.getElementById('activeTable');
-  const graduatedSummary = document.getElementById('graduatedSummary');
-  const gradTable      = document.getElementById('graduatedTable');
-  if(!dueList || !activeSummary || !activeTable || !graduatedSummary || !gradTable) return;
+  renderDueList();
+  renderLeechManagement();
+}
+
+function renderDueList(){
+  const dueList = document.getElementById('dueList');
+  if(!dueList) return;
 
   const todayIso = todayISO();
   const active = leechWords.filter(w => w.status === 'active');
-  const graduated = leechWords.filter(w => w.status === 'graduated');
   const due = active.filter(w => w.nextReviewDate <= todayIso)
                      .sort((a,b) => a.nextReviewDate.localeCompare(b.nextReviewDate));
 
@@ -2287,6 +2294,17 @@ function renderLeech(){
       btn.addEventListener('click', () => handleLeechWrong(btn.dataset.id));
     });
   }
+}
+
+function renderLeechManagement(){
+  const activeSummary  = document.getElementById('activeSummary');
+  const activeTable    = document.getElementById('activeTable');
+  const graduatedSummary = document.getElementById('graduatedSummary');
+  const gradTable      = document.getElementById('graduatedTable');
+  if(!activeSummary || !activeTable || !graduatedSummary || !gradTable) return;
+
+  const active = leechWords.filter(w => w.status === 'active');
+  const graduated = leechWords.filter(w => w.status === 'graduated');
 
   const activeSorted = active.slice().sort((a,b) => a.nextReviewDate.localeCompare(b.nextReviewDate));
   activeSummary.textContent = `登録中の苦手単語（${activeSorted.length}）`;
@@ -2332,7 +2350,6 @@ function renderLeech(){
       btn.addEventListener('click', () => handleLeechDelete(btn.dataset.id));
     });
   }
-
 }
 
 /* ---------- 成績・弱点分析 ---------- */
@@ -2430,7 +2447,7 @@ async function handleScoreAdd(){
   }
 
   scoreRecords.push({
-    id: 's_' + crypto.randomUUID(),
+    id: genId('s_'),
     subject,
     category: categoryEl.value.trim(),
     examType: examType || '',
@@ -2710,7 +2727,6 @@ function showTab(tabName) {
 
 (async function init(){
   buildWeekdayChips();
-  buildWeekdayChips('reviewWeekdayRow', [0, 3, 6]);    // デフォルト：日・水・土
   buildIntervalChips();
   const startDateEl = document.getElementById('startDate');
   if (startDateEl) startDateEl.value = todayISO();
@@ -2781,8 +2797,8 @@ window.addEventListener('DOMContentLoaded', () => {
 
   // 学習する曜日のチップを生成（単語スケジュールと同じ仕組みを再利用）
   buildWeekdayChips('refWeekdayRow', DEFAULT_WEEKDAYS);
-  buildWeekdayChips('refReviewWeekdayRow', [0, 3, 6]); // デフォルト：日・水・土
   // 復習インターバルは進捗入力時に DEFAULT_INTERVALS で自動生成するため、チップ選択UIは不要
+  buildIntervalChips('refIntervalRow');
 
   // 割り振り方法（曜日から設定 / 1日あたりの量から設定）の切り替え
   document.querySelectorAll('input[name="refPlanMode"]').forEach(radio => {
@@ -2805,12 +2821,12 @@ window.addEventListener('DOMContentLoaded', () => {
       if (errorEl) errorEl.textContent = '';
 
       const bookName = document.getElementById('refBookName').value.trim();
-      const startNum = parseInt(document.getElementById('refStartNum').value, 10);
-      const endNum = parseInt(document.getElementById('refEndNum').value, 10);
+      const startNum = parseInt(document.getElementById('refStartPage').value, 10);
+      const endNum = parseInt(document.getElementById('refEndPage').value, 10);
       const startDate = document.getElementById('refStartDate').value;
       const planMode = document.querySelector('input[name="refPlanMode"]:checked').value;
       const weekdays = getCheckedValues('refWeekdayRow');
-      const reviewWeekdays = getCheckedValues('refReviewWeekdayRow'); // ★復習曜日を取得
+      const intervals = getCheckedValues('refIntervalRow');
 
       const showError = (msg) => { if (errorEl) errorEl.textContent = msg; else alert(msg); };
 
@@ -2826,6 +2842,10 @@ window.addEventListener('DOMContentLoaded', () => {
         showError('学習する曜日を1つ以上選んでください。');
         return;
       }
+      if (intervals.length === 0) {
+        showError('復習のタイミングを1つ以上選んでください。');
+        return;
+      }
 
       const newPlan = {
         // id は下部で「新規なら新規発行／編集中なら既存IDを維持」して設定する
@@ -2834,7 +2854,7 @@ window.addEventListener('DOMContentLoaded', () => {
         endNum: endNum,
         startDate: startDate,
         weekdays: weekdays,
-        reviewWeekdays: reviewWeekdays, // ★復習曜日を保存
+        intervals: intervals,
         planMode: planMode
       };
 
@@ -2879,8 +2899,8 @@ window.addEventListener('DOMContentLoaded', () => {
 
       // 入力欄をクリア（教材名・ページ番号のみ）
       document.getElementById('refBookName').value = '';
-      document.getElementById('refStartNum').value = '';
-      document.getElementById('refEndNum').value = '';
+      document.getElementById('refStartPage').value = '';
+      document.getElementById('refEndPage').value = '';
 
       // 登録完了後：設定アコーディオンを閉じて「今日の確認」に注目させる
       const settingDetails = document.getElementById('refSettingDetails');
@@ -2939,7 +2959,7 @@ function renderRefEntryList(){
     item.innerHTML = `
       <div>
         <span class="rng">${escapeHtml(plan.bookName)}　${plan.startNum}〜${plan.endNum}</span>
-        <div class="meta">開始日 ${plan.startDate} ／ 学習日: ${wdLabel || '―'} ／ ${calcInfo} ／ 復習: 進捗入力時に自動設定</div>
+        <div class="meta">開始日 ${plan.startDate} ／ 学習日: ${wdLabel || '―'} ／ ${calcInfo} ／ 復習: ${(plan.intervals ?? []).join('・')}日後</div>
       </div>
       <div class="entry-actions">
         <button class="edit-btn ref-edit-btn" data-id="${plan.id}">編集</button>
@@ -2970,13 +2990,13 @@ function getRefFormState(){
   return {
     planMode: document.querySelector('input[name="refPlanMode"]:checked')?.value || 'byRange',
     bookName: document.getElementById('refBookName').value,
-    startNum: document.getElementById('refStartNum').value,
-    endNum: document.getElementById('refEndNum').value,
+    startNum: document.getElementById('refStartPage').value,
+    endNum: document.getElementById('refEndPage').value,
     startDate: document.getElementById('refStartDate').value,
     endDate: document.getElementById('refEndDate').value,
     amountPerDay: document.getElementById('refAmountPerDay').value,
     weekdays: getCheckedValues('refWeekdayRow'),
-    reviewWeekdays: getCheckedValues('refReviewWeekdayRow'),
+    intervals: getCheckedValues('refIntervalRow'),
   };
 }
 
@@ -2988,13 +3008,13 @@ function setRefFormState(state){
     modeRadio.dispatchEvent(new Event('change'));
   }
   document.getElementById('refBookName').value = state.bookName ?? '';
-  document.getElementById('refStartNum').value = state.startNum ?? '';
-  document.getElementById('refEndNum').value = state.endNum ?? '';
+  document.getElementById('refStartPage').value = state.startNum ?? '';
+  document.getElementById('refEndPage').value = state.endNum ?? '';
   document.getElementById('refStartDate').value = state.startDate ?? '';
   document.getElementById('refEndDate').value = state.endDate ?? '';
   document.getElementById('refAmountPerDay').value = state.amountPerDay ?? '';
   setCheckedValues('refWeekdayRow', state.weekdays || []);
-  setCheckedValues('refReviewWeekdayRow', state.reviewWeekdays || []);
+  setCheckedValues('refIntervalRow', state.intervals || []);
 }
 
 function startEditRefEntry(id){
@@ -3012,7 +3032,7 @@ function startEditRefEntry(id){
     endDate: plan.endDate,
     amountPerDay: plan.amountPerDay,
     weekdays: plan.weekdays,
-    reviewWeekdays: plan.reviewWeekdays,
+    intervals: plan.intervals,
   });
 
   editingRefEntryId = id;
