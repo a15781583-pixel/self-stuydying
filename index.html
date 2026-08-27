@@ -63,24 +63,20 @@
     <!-- 追加：スケジュール表示ビュー -->
   <div id="tab-schedule" class="tab-content">
 
-    <!-- ★ 今日のサマリーカード -->
-    <div class="today-summary-card" id="todaySummaryCard">
-      <div class="ts-date" id="todaySummaryDate">読み込み中...</div>
-      <div class="ts-block">
-        <div class="ts-label">今日の単語</div>
-        <div class="ts-value" id="ts-words">—<span class="ts-unit">語</span></div>
+    <!-- ★ 月目標カード -->
+    <div class="month-goal-card" id="monthGoalCard">
+      <div class="mg-header">
+        <div class="mg-label" id="monthGoalLabel">今月の目標</div>
+        <button type="button" class="btn-ghost mg-edit-btn" id="monthGoalEditBtn">✎ 編集</button>
       </div>
-      <div class="ts-divider"></div>
-      <div class="ts-block">
-        <div class="ts-label">参考書</div>
-        <div class="ts-value" id="ts-pages">—<span class="ts-unit">ページ</span></div>
+      <div class="mg-display" id="monthGoalDisplay">目標が設定されていません。「編集」から入力してください。</div>
+      <div class="mg-edit-area" id="monthGoalEditArea" style="display:none;">
+        <textarea id="monthGoalInput" rows="3" placeholder="例：英単語1500〜1800番を完璧に覚える／参考書を2冊終わらせる"></textarea>
+        <div class="mg-actions">
+          <button type="button" class="btn-primary" id="monthGoalSaveBtn">保存</button>
+          <button type="button" class="btn-ghost" id="monthGoalCancelBtn">キャンセル</button>
+        </div>
       </div>
-      <div class="ts-divider"></div>
-      <div class="ts-block">
-        <div class="ts-label">復習タスク</div>
-        <div class="ts-value" id="ts-reviews">—<span class="ts-unit">件</span></div>
-      </div>
-      <div class="ts-all-done" id="ts-all-done" style="display:none;">✅ 今日の予定はすべて完了！お疲れさまです。</div>
     </div>
 
     <h3 class="sub-head">全体のスケジュール</h3>
