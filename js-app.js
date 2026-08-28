@@ -2299,14 +2299,6 @@ async function handleAdd(){
   });
 }
 
-async function handleReset(){
-  if(!confirm('登録した範囲をすべて削除します。よろしいですか？')) return;
-  entries = [];
-  exitEntryEditMode(); // 全削除時は編集状態も解除しておく
-  await saveEntries();
-  renderAll();
-}
-
 /* ---------- leech words (shared) ---------- */
 
 async function loadLeech(){
@@ -2843,7 +2835,6 @@ function showTab(tabName) {
   const startDateEl = document.getElementById('startDate');
   if (startDateEl) startDateEl.value = todayISO();
   document.getElementById('addBtn')?.addEventListener('click', handleAdd);
-  document.getElementById('resetBtn')?.addEventListener('click', handleReset);
   document.getElementById('cancelEditBtn')?.addEventListener('click', cancelEditEntry);
   document.getElementById('leechAddBtn')?.addEventListener('click', handleLeechAdd);
   document.getElementById('printBtn')?.addEventListener('click', () => window.print());
