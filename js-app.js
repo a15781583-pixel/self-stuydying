@@ -5,6 +5,8 @@ const ANALYSIS_KEY = 'vocab-weakness-analysis';
 const DAILY_PROGRESS_KEY = 'vocab-daily-progress'; // 日別進捗記録
 const MONTH_GOAL_KEY = 'vocab-month-goal'; // 今月の目標
 const WEEKDAYS = ['日','月','火','水','木','金','土'];
+// 復習キーの「日付移動済みサフィックス」を検出・除去するための共通正規表現（例: xxx_moved_2026-01-01）
+const MOVED_KEY_SUFFIX_RE = /_moved_\d{4}-\d{2}-\d{2}$/;
 const DEFAULT_WEEKDAYS = [1,2,3,4,5,6];
 const DEFAULT_INTERVALS = [1,3,7,14];
 const LEECH_WARN_THRESHOLD = 2;
@@ -62,23 +64,28 @@ function getIntervalTier(interval) {
   if (interval <= 7) return 3;
   return 4;
 }
-function getIntervalTierStyle(interval) {
-  const t = getIntervalTier(interval);
-  return [
-    null,
-    { bg:'#dbeafe', color:'#1e40af', border:'#93c5fd', label:'Lv.1 初期',  labelShort:'Lv.1' },
-    { bg:'#d1fae5', color:'#065f46', border:'#6ee7b7', label:'Lv.2 定着',  labelShort:'Lv.2' },
-    { bg:'#fef3c7', color:'#92400e', border:'#fcd34d', label:'Lv.3 強化',  labelShort:'Lv.3' },
-    { bg:'#fee2e2', color:'#991b1b', border:'#fca5a5', label:'Lv.4 仕上げ', labelShort:'Lv.4' },
-  ][t];
+// 階層(tier)ごとの表示情報を一元管理する。ラベル文字列はここが唯一の定義箇所であり、
+// 凡例（reviewLegendHTML）・復習スロット表示（renderProgressedReviews 等）は
+// 必ず getIntervalTierStyle() 経由で参照することで、表記のズレや二重管理を防ぐ。
+// index 0 はダミー（tier番号=配列indexに揃えるため）。
+const INTERVAL_TIER_STYLES = [
+  null,
+  { label: 'Lv.1 初期',   legendDays: '1日後'   },
+  { label: 'Lv.2 定着',   legendDays: '3日後'   },
+  { label: 'Lv.3 強化',   legendDays: '7日後'   },
+  { label: 'Lv.4 仕上げ', legendDays: '14日後〜' },
+];
+function getIntervalTierStyle(tier) {
+  return INTERVAL_TIER_STYLES[tier] || { label: '', legendDays: '' };
 }
 function reviewLegendHTML() {
+  const badges = [1, 2, 3, 4].map(tier => {
+    const { label, legendDays } = getIntervalTierStyle(tier);
+    return `<span class="review-legend-badge tag-review-t${tier}">${label} <small>${legendDays}</small></span>`;
+  }).join('\n    ');
   return `<div class="review-legend">
     <span class="review-legend-label">🎯 復習ステップ：</span>
-    <span class="review-legend-badge tag-review-t1">Lv.1 初期 <small>1日後</small></span>
-    <span class="review-legend-badge tag-review-t2">Lv.2 定着 <small>3日後</small></span>
-    <span class="review-legend-badge tag-review-t3">Lv.3 強化 <small>7日後</small></span>
-    <span class="review-legend-badge tag-review-t4">Lv.4 仕上げ <small>14日後〜</small></span>
+    ${badges}
     <span style="color:var(--ink-soft); margin-left:4px; font-size:.68rem;">数字が大きいほど記憶定着の山場です</span>
   </div>`;
 }
@@ -104,14 +111,46 @@ function buildCarryBadgeHtml(originalDate, cls = 'carry-badge') {
  */
 function buildReviewBadgeHtml(interval, delayedDays, layout = 'inline') {
   const tier = getIntervalTier(interval);
-  const ts = getIntervalTierStyle(interval);
   // 🔁 復習 Lv.X [N日後]
-  const mainBadge = `<span style="display:inline-flex;align-items:center;gap:3px;background:${ts.bg};color:${ts.color};border:1px solid ${ts.border};border-radius:4px;padding:1px 6px;font-size:.68rem;font-weight:700;white-space:nowrap;">🔁 復習 Lv.${tier} [${interval}日後]</span>`;
+  // 色は css-style.css の .tag-review-t{tier} を流用（JS側でのハードコード二重管理を回避）
+  const mainBadge = `<span class="tag-review-t${tier}" style="display:inline-flex;align-items:center;gap:3px;border-radius:4px;padding:1px 6px;font-size:.68rem;font-weight:700;white-space:nowrap;">🔁 復習 Lv.${tier} [${interval}日後]</span>`;
   // 🔄 [遅れN日]（遅れがある場合のみ）
   const delayBadge = delayedDays > 0
     ? `<span style="display:inline-flex;align-items:center;background:#b23a2e;color:#fff;border-radius:4px;padding:1px 6px;font-size:.68rem;font-weight:700;white-space:nowrap;">🔄 [遅れ${delayedDays}日]</span>`
     : '';
   return `${mainBadge}${delayBadge ? ' ' + delayBadge : ''}`;
+}
+
+/**
+ * 統合スケジュール（buildDayCard）の「新規タスク1件」分のHTMLを返す（単語・参考書共通）。
+ * 色・ラベル文字列・書名フォールバックの有無だけが種別（kind）によって異なる。
+ * @param {object} item - チャンク（w または b）。carriedForward/isCarriedNew/bookName/rangeStart/rangeEnd を参照
+ * @param {'word'|'book'} kind
+ */
+const DAY_TASK_KIND_STYLES = {
+  word: { label: '単語',   bg: '#e3f2fd', fg: '#0d47a1', nameFallback: '単語' },
+  book: { label: '参考書', bg: '#e8f5e9', fg: '#1b5e20', nameFallback: null },
+};
+function buildDayTaskItemHtml(item, kind) {
+  const { label, bg, fg, nameFallback } = DAY_TASK_KIND_STYLES[kind];
+  const carryBadge = item.carriedForward
+    ? buildCarryBadgeHtml(item.originalDate)
+    : (item.isCarriedNew ? buildCarryBadgeHtml(item.originalDate || null) : '');
+  const displayName = nameFallback !== null ? (item.bookName || nameFallback) : item.bookName;
+  return `<div style="margin-top:6px;display:flex;flex-wrap:wrap;align-items:center;gap:4px;"><span style="background:${bg};color:${fg};padding:2px 6px;border-radius:4px;font-size:0.75rem;font-weight:bold;">${label}</span>${carryBadge}<span style="color:#333;font-size:.85rem;">${escapeHtml(displayName)}: ${item.rangeStart} 〜 ${item.rangeEnd}</span></div>`;
+}
+
+/**
+ * 統合スケジュール（buildDayCard）の「復習タスク1件」分のHTMLを返す（単語・参考書共通）。
+ * 単語復習のみ bookName 未設定時に「単語」とフォールバック表示する点が唯一の差分。
+ * @param {object} r - 復習項目。interval/delayedDays/done/key/bookName/rangeStart/rangeEnd を参照
+ * @param {'word'|'book'} kind
+ */
+function buildDayReviewItemHtml(r, kind) {
+  const tier = getIntervalTier(r.interval);
+  const reviewBadge = buildReviewBadgeHtml(r.interval, r.delayedDays);
+  const displayName = kind === 'word' ? (r.bookName || '単語') : r.bookName;
+  return `<div style="margin-top:6px;max-width:100%;overflow:hidden;"><label class="tag-review-t${tier}" style="cursor:pointer;display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:6px 9px;border-radius:6px;${r.done ? 'opacity:.5;text-decoration:line-through;' : ''}"><input type="checkbox" class="review-check" data-key="${r.key}" ${r.done ? 'checked' : ''} style="margin:0;flex-shrink:0;">${reviewBadge}<span style="color:#333;font-size:.8rem;word-break:break-all;">${escapeHtml(displayName)} ${r.rangeStart}〜${r.rangeEnd}</span></label></div>`;
 }
 // ──────────────────────────────────────────────────────────────
 
@@ -153,7 +192,7 @@ function computeEffectiveReviewDate(originalIso, key){
   //    isDoneInPanel は originalIso 以前のレコードのみ対象とすれば十分。
   const isDoneInPanel = dailyProgress.some(p =>
     (p.type === 'word-review' || p.type === 'book-review') &&
-    p.reviewKey != null && (p.reviewKey === key || p.reviewKey.replace(/_moved_\d{4}-\d{2}-\d{2}$/, '') === key) &&
+    p.reviewKey != null && (p.reviewKey === key || p.reviewKey.replace(MOVED_KEY_SUFFIX_RE, '') === key) &&
     p.date <= originalIso &&
     !p.notProgressed &&
     p.actualEnd >= p.plannedEnd
@@ -180,6 +219,32 @@ function computeEffectiveReviewDate(originalIso, key){
   return { date: newDate, movedKey, delayedDays: diffDays, done: false };
 }
 
+// 復習リスト生成の共通コア処理（単語・参考書、チャンク起点・進捗記録起点の全パターンで共用）。
+// 「originalDate計算 → key生成 → computeEffectiveReviewDate → push」という
+// buildReviewsFromChunks/buildProgressReviews/addReviewsFromCf 共通のパターンを1箇所に集約する。
+// items        : 元データ配列（chunks・progressItems などコレクション取得方法だけが呼び出し側で異なる）
+// keyOf        : (item, interval) → 復習キー
+// dateOf       : item → 起点日（学習日）のISO文字列
+// rangeOf      : item → { rangeStart, rangeEnd }
+// getIntervals : item → インターバル日数配列
+// extraFields  : item → pushするオブジェクトに追加するフィールド
+// out          : 結果をpushする配列（省略時は新規配列を作成して返す。addReviewsFromCf のように
+//                既存配列へ追記したい場合は呼び出し側の配列を渡す）
+function buildReviewEntries(items, keyOf, dateOf, rangeOf, getIntervals, extraFields, out = []) {
+  items.forEach(item => {
+    (getIntervals(item) || []).forEach(n => {
+      const originalDate = formatISO(addDays(parseISO(dateOf(item)), n));
+      const key = keyOf(item, n);
+      const eff = computeEffectiveReviewDate(originalDate, key);
+      const { rangeStart, rangeEnd } = rangeOf(item);
+      out.push({ date: eff.date, originalDate, rangeStart, rangeEnd,
+        interval: n, key: eff.movedKey ?? key, delayedDays: eff.delayedDays, done: eff.done,
+        ...extraFields(item) });
+    });
+  });
+  return out;
+}
+
 // オリジナル計画チャンクから復習リストを生成する共通ヘルパー（単語・参考書共用）。
 // chunks  : フィルタ済みチャンク配列
 // prefix  : キー接頭辞（'w' or 'r'）
@@ -187,18 +252,14 @@ function computeEffectiveReviewDate(originalIso, key){
 // getIntervals: chunk → インターバル日数配列
 // extraFields : chunk → pushするオブジェクトに追加するフィールド
 function buildReviewsFromChunks(chunks, prefix, getOwnerId, getIntervals, extraFields) {
-  const raw = [];
-  chunks.forEach(c => {
-    (getIntervals(c) || []).forEach(n => {
-      const originalDate = formatISO(addDays(parseISO(c.date), n));
-      const key = buildReviewKey(prefix, getOwnerId(c), c.rangeStart, c.rangeEnd, n);
-      const eff = computeEffectiveReviewDate(originalDate, key);
-      raw.push({ date: eff.date, originalDate, rangeStart: c.rangeStart, rangeEnd: c.rangeEnd,
-        interval: n, key: eff.movedKey ?? key, delayedDays: eff.delayedDays, done: eff.done,
-        ...extraFields(c) });
-    });
-  });
-  return raw;
+  return buildReviewEntries(
+    chunks,
+    (c, n) => buildReviewKey(prefix, getOwnerId(c), c.rangeStart, c.rangeEnd, n),
+    c => c.date,
+    c => ({ rangeStart: c.rangeStart, rangeEnd: c.rangeEnd }),
+    getIntervals,
+    extraFields
+  );
 }
 
 // 進捗記録ベースの復習リストを生成する共通ヘルパー（単語・参考書共用）。
@@ -209,23 +270,23 @@ function buildReviewsFromChunks(chunks, prefix, getOwnerId, getIntervals, extraF
 // getIntervals  : entity → インターバル日数配列
 // extraFields   : (p, resolved, entity) → 追加フィールド
 function buildProgressReviews(progressItems, prefix, getResolved, getEntity, getIntervals, extraFields) {
-  const raw = [];
-  progressItems.forEach(p => {
-    const resolved = getResolved(p);
-    const entity = getEntity(resolved);
-    if (!entity) return;
-    (getIntervals(entity) || []).forEach(n => {
-      const originalDate = formatISO(addDays(parseISO(p.date), n));
-      const key = `${prefix}_prog_${resolved}_${p.date}_${p.plannedStart}_${n}`;
-      const eff = computeEffectiveReviewDate(originalDate, key);
-      raw.push({
-        date: eff.date, originalDate, rangeStart: p.plannedStart, rangeEnd: p.actualEnd,
-        interval: n, key: eff.movedKey ?? key, delayedDays: eff.delayedDays, done: eff.done,
-        ...extraFields(p, resolved, entity)
-      });
-    });
-  });
-  return raw;
+  // entity が見つからない進捗記録は対象外（元の実装通り、コアヘルパーに渡す前に除外する）
+  const resolvedItems = progressItems
+    .map(p => {
+      const resolved = getResolved(p);
+      const entity = getEntity(resolved);
+      return entity ? { p, resolved, entity } : null;
+    })
+    .filter(Boolean);
+
+  return buildReviewEntries(
+    resolvedItems,
+    (item, n) => `${prefix}_prog_${item.resolved}_${item.p.date}_${item.p.plannedStart}_${n}`,
+    item => item.p.date,
+    item => ({ rangeStart: item.p.plannedStart, rangeEnd: item.p.actualEnd }),
+    item => getIntervals(item.entity),
+    item => extraFields(item.p, item.resolved, item.entity)
+  );
 }
 
 // 単語・参考書の全復習項目（本来の日付＋ずらし後の実効日付）をまとめて計算する共通関数。
@@ -380,7 +441,7 @@ function isReviewFromOriginalSchedule(review, cfChunk, type) {
   const expectedKey = buildReviewKey(prefix, ownerId, cfChunk.rangeStart, cfChunk.rangeEnd, review.interval);
   
   // 変更点: 完全一致だけでなく、移動済みのキー(_moved_)も判定に含める
-  const reviewBaseKey = review.key.replace(/_moved_\d{4}-\d{2}-\d{2}$/, '');
+  const reviewBaseKey = review.key.replace(MOVED_KEY_SUFFIX_RE, '');
   if (reviewBaseKey !== expectedKey) return false;
   
   const expectedOriginal = formatISO(addDays(parseISO(cfChunk.originalDate), review.interval));
@@ -389,16 +450,15 @@ function isReviewFromOriginalSchedule(review, cfChunk, type) {
 
 
 function addReviewsFromCf(cfList, prefix, filteredReviews, getOwnerId, getIntervals, extraFields) {
-  cfList.forEach(c => {
-    (getIntervals(c) || []).forEach(n => {
-      const originalDate = formatISO(addDays(parseISO(c.date), n));
-      const key = buildReviewKey(prefix, getOwnerId(c), c.rangeStart, c.rangeEnd, n);
-      const eff = computeEffectiveReviewDate(originalDate, key);
-      filteredReviews.push({ date: eff.date, originalDate, rangeStart: c.rangeStart, rangeEnd: c.rangeEnd,
-        interval: n, key: eff.movedKey ?? key, delayedDays: eff.delayedDays, done: eff.done,
-        ...extraFields(c) });
-    });
-  });
+  buildReviewEntries(
+    cfList,
+    (c, n) => buildReviewKey(prefix, getOwnerId(c), c.rangeStart, c.rangeEnd, n),
+    c => c.date,
+    c => ({ rangeStart: c.rangeStart, rangeEnd: c.rangeEnd }),
+    getIntervals,
+    extraFields,
+    filteredReviews // 既存配列に追記する（元の実装と同様、戻り値は使わない）
+  );
 }
 
 function adjustReviewsForCarryForward(vocabReviews, refReviews, cfVocab, cfRef) {
@@ -455,7 +515,7 @@ function attachReviewCheckHandlers(container){
       // 【Bug 1 修正】期限超過で日付移動した復習項目のキーは movedKey（例: `originalKey_moved_YYYY-MM-DD`）になっている。
       // computeEffectiveReviewDate は originalKey（サフィックスなし）で reviewDoneSet を照合するため、
       // ここで _moved_YYYY-MM-DD サフィックスを除去した originalKey をセットに保存することでミスマッチを解消する。
-      const originalKey = key.replace(/_moved_\d{4}-\d{2}-\d{2}$/, '');
+      const originalKey = key.replace(MOVED_KEY_SUFFIX_RE, '');
       if(cb.checked){ reviewDoneSet.add(originalKey); } else { reviewDoneSet.delete(originalKey); }
       saveReviewDone();
       refreshAllSchedules();
@@ -520,6 +580,8 @@ const MATERIAL_CONFIGS = {
     ),
     // チャンクに付与する種別固有のフィールド（entryId + 復習インターバル）
     chunkIdFields: (material) => ({ entryId: material.id, intervals: material.intervals }),
+    // computeEarlyDays 用：呼び出し元から渡された entry をそのまま対象として扱う
+    resolveMaterial: (entry) => entry,
   },
   book: {
     type: 'book',
@@ -531,6 +593,8 @@ const MATERIAL_CONFIGS = {
     ),
     // チャンクに付与する種別固有のフィールド（planId + intervals）
     chunkIdFields: (material) => ({ planId: material.id, intervals: material.intervals }),
+    // computeEarlyDays 用：渡された entry の id を使って refEntries から最新のプランを取得する
+    resolveMaterial: (entry) => refEntries.find(p => p.id === entry.id),
   },
 };
 
@@ -666,24 +730,17 @@ function computeAdjustedRefSchedule(plan)     { return computeAdjustedSchedule('
  * returns: 何日早く終わるか（0以下なら早まらない）
  */
 function computeEarlyDays(entry, type, actualEnd) {
-  if (type === 'word') {
-    if (actualEnd < entry.endNum) return 0;
-    const originalChunks = computeChunksForEntry(entry);
-    if (originalChunks.length === 0) return 0;
-    const lastChunk = originalChunks[originalChunks.length - 1];
-    const todayD = parseISO(todayISO());
-    const lastD = parseISO(lastChunk.date);
-    return Math.max(0, Math.round((lastD - todayD) / 86400000));
-  } else {
-    const plan = refEntries.find(p => p.id === entry.id);
-    if (!plan || actualEnd < plan.endNum) return 0;
-    const originalChunks = computeRefSchedule(plan);
-    if (originalChunks.length === 0) return 0;
-    const lastChunk = originalChunks[originalChunks.length - 1];
-    const todayD = parseISO(todayISO());
-    const lastD = parseISO(lastChunk.date);
-    return Math.max(0, Math.round((lastD - todayD) / 86400000));
-  }
+  const cfg = MATERIAL_CONFIGS[type];
+  const material = cfg.resolveMaterial(entry);
+  if (!material || actualEnd < material.endNum) return 0;
+
+  const originalChunks = cfg.computeBaseSchedule(material);
+  if (originalChunks.length === 0) return 0;
+
+  const lastChunk = originalChunks[originalChunks.length - 1];
+  const todayD = parseISO(todayISO());
+  const lastD = parseISO(lastChunk.date);
+  return Math.max(0, Math.round((lastD - todayD) / 86400000));
 }
 
 /* ---------- weekly range entries (shared) ---------- */
@@ -785,48 +842,72 @@ function computeRefSchedule(plan) {
   return computeScheduleChunks(plan, { intervals: plan.intervals || [] });
 }
 
-function renderEntryList(){
-  const list = document.getElementById('entryList');
+// ── 登録済みエントリの一覧描画（単語・参考書共通ファクトリ）────────────
+// カード生成・編集/削除ボタンへのイベント付与という共通の骨組みを1本化し、
+// ラベル文言・削除確認の有無など型固有の差分だけを cfg のフック関数に委譲する。
+function renderEntryCardList(cfg){
+  const list = document.getElementById(cfg.listId);
   if(!list) return;
   list.innerHTML = '';
-  if(entries.length === 0) return;
-  entries.forEach(entry => {
-    const item = document.createElement('div');
-    item.className = 'entry-item';
-    const wdLabel = (entry.weekdays || []).slice().sort((a,b)=>a-b).map(i=>WEEKDAYS[i]).join('・');
-    
-    // 期間の表示をスマートに分岐
-    let modeText = '';
-    if (entry.planMode === 'byAmount') {
-      modeText = `開始日 ${entry.startDate} (1日${entry.amountPerDay}単語)`;
-    } else {
-      modeText = entry.endDate ? `${entry.startDate} 〜 ${entry.endDate}` : `開始日 ${entry.startDate} (1週間)`;
-    }
+  const items = cfg.getItems();
+  if(items.length === 0) return;
 
-    item.classList.toggle('is-editing', entry.id === editingEntryId);
-    item.innerHTML = `
+  items.forEach(item => {
+    const el = document.createElement('div');
+    el.className = 'entry-item';
+    el.classList.toggle('is-editing', item.id === cfg.getEditingId());
+    const editExtra = cfg.editBtnExtraClass ? ` ${cfg.editBtnExtraClass}` : '';
+    const delExtra = cfg.delBtnExtraClass ? ` ${cfg.delBtnExtraClass}` : '';
+    el.innerHTML = `
       <div>
-        <span class="rng">${escapeHtml(entry.bookName || '単語')}　${entry.startNum}〜${entry.endNum}</span>
-        <div class="meta">${modeText} ／ 学習日: ${wdLabel} ／ 復習: ${(entry.intervals ?? []).join('・')}日後</div>
+        <span class="rng">${cfg.buildLabel(item)}</span>
+        <div class="meta">${cfg.buildMeta(item)}</div>
       </div>
       <div class="entry-actions">
-        <button class="edit-btn" data-id="${entry.id}">編集</button>
-        <button class="del-btn" data-id="${entry.id}">削除</button>
+        <button class="edit-btn${editExtra}" data-id="${item.id}">編集</button>
+        <button class="del-btn${delExtra}" data-id="${item.id}">削除</button>
       </div>
     `;
-    list.appendChild(item);
+    list.appendChild(el);
   });
-  list.querySelectorAll('.edit-btn').forEach(btn => {
-    btn.addEventListener('click', () => startEditEntry(btn.dataset.id));
+
+  list.querySelectorAll(cfg.editBtnSelector).forEach(btn => {
+    btn.addEventListener('click', () => cfg.onEdit(btn.dataset.id));
   });
-  list.querySelectorAll('.del-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
+  list.querySelectorAll(cfg.delBtnSelector).forEach(btn => {
+    btn.addEventListener('click', () => cfg.onDelete(btn.dataset.id));
+  });
+}
+
+function renderEntryList(){
+  renderEntryCardList({
+    listId: 'entryList',
+    getItems: () => entries,
+    getEditingId: () => editingEntryId,
+    editBtnExtraClass: '',
+    delBtnExtraClass: '',
+    editBtnSelector: '.edit-btn',
+    delBtnSelector: '.del-btn',
+    buildLabel: (entry) => `${escapeHtml(entry.bookName || '単語')}　${entry.startNum}〜${entry.endNum}`,
+    buildMeta: (entry) => {
+      const wdLabel = (entry.weekdays || []).slice().sort((a,b)=>a-b).map(i=>WEEKDAYS[i]).join('・');
+      // 期間の表示をスマートに分岐
+      let modeText = '';
+      if (entry.planMode === 'byAmount') {
+        modeText = `開始日 ${entry.startDate} (1日${entry.amountPerDay}単語)`;
+      } else {
+        modeText = entry.endDate ? `${entry.startDate} 〜 ${entry.endDate}` : `開始日 ${entry.startDate} (1週間)`;
+      }
+      return `${modeText} ／ 学習日: ${wdLabel} ／ 復習: ${(entry.intervals ?? []).join('・')}日後`;
+    },
+    onEdit: (id) => startEditEntry(id),
+    onDelete: async (id) => {
       // 編集中の項目が削除された場合は編集モードを解除しておく（不整合防止）
-      if (editingEntryId === btn.dataset.id) exitEntryEditMode();
-      entries = entries.filter(e => e.id !== btn.dataset.id);
+      if (editingEntryId === id) exitEntryEditMode();
+      entries = entries.filter(e => e.id !== id);
       await saveEntries();
       renderAll();
-    });
+    },
   });
 }
 
@@ -992,7 +1073,7 @@ function renderIntegratedSchedule() {
       return null;
     }
 
-    const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][currentLoopDate.getDay()];
+    const dayOfWeek = WEEKDAYS[currentLoopDate.getDay()];
     const mm = String(currentLoopDate.getMonth() + 1).padStart(2, '0');
     const dd = String(currentLoopDate.getDate()).padStart(2, '0');
 
@@ -1001,37 +1082,16 @@ function renderIntegratedSchedule() {
 
     let taskHtml = '';
 
-    dayWords.forEach(w => {
-      // STEP 8: 未完了繰越バッジを統一形式で表示
-      // 元の計画はバッジなし。carriedForward / isCarriedNew は ⚠️ 未完了繰越 [元日付]
-      const carryBadge = w.carriedForward
-        ? buildCarryBadgeHtml(w.originalDate)
-        : (w.isCarriedNew ? buildCarryBadgeHtml(w.originalDate || null) : '');
-      taskHtml += `<div style="margin-top:6px;display:flex;flex-wrap:wrap;align-items:center;gap:4px;"><span style="background:#e3f2fd;color:#0d47a1;padding:2px 6px;border-radius:4px;font-size:0.75rem;font-weight:bold;">単語</span>${carryBadge}<span style="color:#333;font-size:.85rem;">${escapeHtml(w.bookName || '単語')}: ${w.rangeStart} 〜 ${w.rangeEnd}</span></div>`;
-    });
+    // STEP 8: 新規タスク（単語・参考書）を統一ヘルパーで描画。
+    // 色・ラベル・繰越バッジの有無は buildDayTaskItemHtml 内の kind 別スタイル定義に集約済み。
+    dayWords.forEach(w => { taskHtml += buildDayTaskItemHtml(w, 'word'); });
+    dayBooks.forEach(b => { taskHtml += buildDayTaskItemHtml(b, 'book'); });
 
-    dayBooks.forEach(b => {
-      // STEP 8: 参考書の未完了繰越バッジを統一形式で表示（carriedForward / isCarriedNew 両対応）
-      const carryBadge = b.carriedForward
-        ? buildCarryBadgeHtml(b.originalDate)
-        : (b.isCarriedNew ? buildCarryBadgeHtml(b.originalDate || null) : '');
-      taskHtml += `<div style="margin-top:6px;display:flex;flex-wrap:wrap;align-items:center;gap:4px;"><span style="background:#e8f5e9;color:#1b5e20;padding:2px 6px;border-radius:4px;font-size:0.75rem;font-weight:bold;">参考書</span>${carryBadge}<span style="color:#333;font-size:.85rem;">${escapeHtml(b.bookName)}: ${b.rangeStart} 〜 ${b.rangeEnd}</span></div>`;
-    });
-
-    dayWordReviews.forEach(r => {
-      // STEP 8: 復習バッジを統一形式で表示
-      // 通常: 🔁 復習 Lv.X [N日後]  /  移動済み: 🔁 復習 Lv.X [N日後] + 🔄 [遅れN日]
-      const ts = getIntervalTierStyle(r.interval);
-      const reviewBadge = buildReviewBadgeHtml(r.interval, r.delayedDays);
-      taskHtml += `<div style="margin-top:6px;max-width:100%;overflow:hidden;"><label style="cursor:pointer;display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:6px 9px;border-radius:6px;background:${ts.bg};border:1px solid ${ts.border};${r.done ? 'opacity:.5;text-decoration:line-through;' : ''}"><input type="checkbox" class="review-check" data-key="${r.key}" ${r.done ? 'checked' : ''} style="margin:0;flex-shrink:0;">${reviewBadge}<span style="color:#333;font-size:.8rem;word-break:break-all;">${escapeHtml(r.bookName || '単語')} ${r.rangeStart}〜${r.rangeEnd}</span></label></div>`;
-    });
-
-    dayBookReviews.forEach(r => {
-      // STEP 8: 参考書復習バッジを統一形式で表示
-      const ts = getIntervalTierStyle(r.interval);
-      const reviewBadge = buildReviewBadgeHtml(r.interval, r.delayedDays);
-      taskHtml += `<div style="margin-top:6px;max-width:100%;overflow:hidden;"><label style="cursor:pointer;display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:6px 9px;border-radius:6px;background:${ts.bg};border:1px solid ${ts.border};${r.done ? 'opacity:.5;text-decoration:line-through;' : ''}"><input type="checkbox" class="review-check" data-key="${r.key}" ${r.done ? 'checked' : ''} style="margin:0;flex-shrink:0;">${reviewBadge}<span style="color:#333;font-size:.8rem;word-break:break-all;">${escapeHtml(r.bookName)} ${r.rangeStart}〜${r.rangeEnd}</span></label></div>`;
-    });
+    // STEP 8: 復習タスク（単語・参考書）を統一ヘルパーで描画。
+    // 通常: 🔁 復習 Lv.X [N日後]  /  移動済み: 🔁 復習 Lv.X [N日後] + 🔄 [遅れN日]
+    // 色は css-style.css の .tag-review-t{tier} を流用（JS側でのハードコード二重管理を回避）
+    dayWordReviews.forEach(r => { taskHtml += buildDayReviewItemHtml(r, 'word'); });
+    dayBookReviews.forEach(r => { taskHtml += buildDayReviewItemHtml(r, 'book'); });
 
     if (taskHtml === '') {
       taskHtml = `<div style="color: #999; font-size: 0.85rem; margin-top: 4px;">予定なし</div>`;
@@ -1290,6 +1350,53 @@ function buildReviewProgressItems(pendingReviews, type, unit, dividerLabel, date
 }
 
 /**
+ * 新規チャンク（単語・参考書共通）1件分の進捗入力アイテムHTMLを返す。
+ * 「新規：単語チャンク」「新規：参考書チャンク」の2つのforEachが、
+ * entryId/planId・単位（個/ページ）・bookName初期値以外ほぼ同一だったため共通化。
+ * @param {Object} chunk - 対象チャンク（単語チャンク or 参考書チャンク）
+ * @param {Object} cfg
+ * @param {'word'|'book'} cfg.type       - 進捗記録の種別
+ * @param {string} cfg.unit              - 単位文字列（'個' | 'ページ'）
+ * @param {string} cfg.ownerAttrName     - data属性名（'origin-entry-id' | 'plan-id'）
+ * @param {function} cfg.getOwnerId      - chunk → ownerID（entryId or planId）
+ * @param {function} cfg.getBookName     - chunk → 表示用の教材名（初期値の扱いが単語/参考書で異なる）
+ * @param {boolean} cfg.showCarryBadge   - 未完了繰越バッジを表示するか（単語チャンクでは非表示）
+ * @param {Array}  existingRecords       - 当日の既存進捗レコード
+ * @param {string} dateStr               - 対象日付 (YYYY-MM-DD)
+ */
+function buildNewChunkProgressItemHtml(chunk, cfg, existingRecords, dateStr) {
+  const ownerId = cfg.getOwnerId(chunk);
+  // ★ composite key：ownerId + チャンク本来の日付 + 開始位置（同一教材の複数チャンク衝突防止）
+  // 繰り越し分は originalDate、通常分は dateStr（= chunk.date）を使う
+  const chunkBaseDate = chunk.carriedForward ? (chunk.originalDate || chunk.date) : chunk.date;
+  const chunkEntryId  = `${ownerId}_${chunkBaseDate}_${chunk.rangeStart}`;
+
+  const rec = existingRecords.find(p => p.entryId === chunkEntryId && p.type === cfg.type);
+  const recordedVal  = rec ? rec.actualEnd : '';
+  const plannedCount = chunk.rangeEnd - chunk.rangeStart + 1;
+  const bookName = cfg.getBookName(chunk);
+
+  // STEP 8: 未完了繰越バッジを統一形式で表示（carriedForward / isCarriedNew 両対応）
+  const cfNote = cfg.showCarryBadge
+    ? (chunk.carriedForward ? buildCarryBadgeHtml(chunk.originalDate) : (chunk.isCarriedNew ? buildCarryBadgeHtml(chunk.originalDate || null) : ''))
+    : '';
+
+  const statusHtml = rec
+    ? `<span class="progress-status-badge ${rec.actualEnd >= chunk.rangeEnd ? 'ps-on-track' : 'ps-behind'}">
+         ${rec.actualEnd >= chunk.rangeEnd ? '✅ 完了' : `⚠️ ${rec.actualEnd - chunk.rangeStart + 1}/${plannedCount}${cfg.unit}完了`}
+       </span>`
+    : '';
+
+  const dataAttrs = `data-entry-id="${chunkEntryId}" data-${cfg.ownerAttrName}="${ownerId}" data-type="${cfg.type}" data-planned-start="${chunk.rangeStart}" data-planned-end="${chunk.rangeEnd}" data-date="${dateStr}" data-book-name="${escapeHtml(bookName)}"`;
+
+  return `
+      <div class="progress-item">
+        <span class="progress-plan-label">${escapeHtml(bookName)} ${chunk.rangeStart}〜${chunk.rangeEnd}（予定 ${plannedCount}${cfg.unit}）${cfNote}</span>
+        ${buildProgControlHtml(chunk.rangeStart, chunk.rangeEnd, recordedVal, cfg.type, statusHtml, dataAttrs)}
+      </div>`;
+}
+
+/**
  * 今日の単語・参考書チャンクに対する進捗入力セクションのHTMLを返す
  * @param {string} dateStr          - 対象日付 (YYYY-MM-DD)
  * @param {Array}  dayWords         - 当日の単語チャンク（新規）
@@ -1309,55 +1416,26 @@ function buildProgressInputSection(dateStr, dayWords, dayBooks, baseId, dayWordR
 
   // ── 新規：単語チャンク ──────────────────────────────────────
   dayWords.forEach(w => {
-    // ★ composite key：entryId + チャンク本来の日付 + 開始番号（同一単語帳の複数チャンク衝突防止）
-    const chunkDate = w.carriedForward ? (w.originalDate || w.date) : w.date;
-    const chunkKey  = `${w.entryId}_${chunkDate}_${w.rangeStart}`;
-
-    const rec = existingRecords.find(p => p.entryId === chunkKey && p.type === 'word');
-    const recordedVal = rec ? rec.actualEnd : '';
-    const plannedCount = w.rangeEnd - w.rangeStart + 1;
-    const statusHtml = rec
-      ? `<span class="progress-status-badge ${rec.actualEnd >= w.rangeEnd ? 'ps-on-track' : 'ps-behind'}">
-           ${rec.actualEnd >= w.rangeEnd ? '✅ 完了' : `⚠️ ${rec.actualEnd - w.rangeStart + 1}/${plannedCount}個完了`}
-         </span>`
-      : '';
-    itemsHtml += `
-      <div class="progress-item">
-        <span class="progress-plan-label">${escapeHtml(w.bookName || '単語')} ${w.rangeStart}〜${w.rangeEnd}（予定 ${plannedCount}個）</span>
-        ${buildProgControlHtml(
-          w.rangeStart, w.rangeEnd, recordedVal, 'word', statusHtml,
-          `data-entry-id="${chunkKey}" data-origin-entry-id="${w.entryId}" data-type="word" data-planned-start="${w.rangeStart}" data-planned-end="${w.rangeEnd}" data-date="${dateStr}" data-book-name="${escapeHtml(w.bookName || '単語')}"`
-        )}
-      </div>`;
+    itemsHtml += buildNewChunkProgressItemHtml(w, {
+      type: 'word',
+      unit: '個',
+      ownerAttrName: 'origin-entry-id',
+      getOwnerId: c => c.entryId,
+      getBookName: c => c.bookName || '単語',
+      showCarryBadge: false
+    }, existingRecords, dateStr);
   });
 
   // ── 新規：参考書チャンク ─────────────────────────────────────
   dayBooks.forEach(b => {
-    const planId = b.planId;
-    // チャンクを一意に識別するキー: planId + チャンク本来の日付 + 開始ページ
-    // 繰り越し分は originalDate、通常分は dateStr（= b.date）を使う
-    const chunkOriginalDate = b.carriedForward ? (b.originalDate || b.date) : b.date;
-    const chunkEntryId = `${planId}_${chunkOriginalDate}_${b.rangeStart}`;
-    const rec = existingRecords.find(p => p.entryId === chunkEntryId && p.type === 'book');
-    const recordedVal = rec ? rec.actualEnd : '';
-    const plannedCount = b.rangeEnd - b.rangeStart + 1;
-    // STEP 8: 未完了繰越バッジを統一形式で表示（carriedForward / isCarriedNew 両対応）
-    const cfNote = b.carriedForward
-      ? buildCarryBadgeHtml(b.originalDate)
-      : (b.isCarriedNew ? buildCarryBadgeHtml(b.originalDate || null) : '');
-    const statusHtml = rec
-      ? `<span class="progress-status-badge ${rec.actualEnd >= b.rangeEnd ? 'ps-on-track' : 'ps-behind'}">
-           ${rec.actualEnd >= b.rangeEnd ? '✅ 完了' : `⚠️ ${rec.actualEnd - b.rangeStart + 1}/${plannedCount}ページ完了`}
-         </span>`
-      : '';
-    itemsHtml += `
-      <div class="progress-item">
-        <span class="progress-plan-label">${escapeHtml(b.bookName)} ${b.rangeStart}〜${b.rangeEnd}（予定 ${plannedCount}ページ）${cfNote}</span>
-        ${buildProgControlHtml(
-          b.rangeStart, b.rangeEnd, recordedVal, 'book', statusHtml,
-          `data-entry-id="${chunkEntryId}" data-plan-id="${planId}" data-type="book" data-planned-start="${b.rangeStart}" data-planned-end="${b.rangeEnd}" data-date="${dateStr}" data-book-name="${escapeHtml(b.bookName)}"`
-        )}
-      </div>`;
+    itemsHtml += buildNewChunkProgressItemHtml(b, {
+      type: 'book',
+      unit: 'ページ',
+      ownerAttrName: 'plan-id',
+      getOwnerId: c => c.planId,
+      getBookName: c => c.bookName,
+      showCarryBadge: true
+    }, existingRecords, dateStr);
   });
 
   // ── 復習：単語・参考書（共通ヘルパーで処理） ────────────────
@@ -1704,9 +1782,9 @@ function handleProgressSave(dateStr, baseId) {
       // val が plannedEnd に達していれば完了済みとしてセットに追加し、
       // 未達の場合（途中・進捗なし含む）は削除してカレンダーに残すようにする。
       if (val >= plannedEnd) {
-        reviewDoneSet.add(reviewKey.replace(/_moved_\d{4}-\d{2}-\d{2}$/, ''));
+        reviewDoneSet.add(reviewKey.replace(MOVED_KEY_SUFFIX_RE, ''));
       } else {
-        reviewDoneSet.delete(reviewKey.replace(/_moved_\d{4}-\d{2}-\d{2}$/, '')); // originalKey を削除
+        reviewDoneSet.delete(reviewKey.replace(MOVED_KEY_SUFFIX_RE, '')); // originalKey を削除
       }
       savedRecords.push(record);
       saved++;
@@ -1739,7 +1817,7 @@ function handleProgressSave(dateStr, baseId) {
           intervals.forEach(n => {
             const key = `${prefix}_prog_${resolved}_${p.date}_${p.plannedStart}_${n}`;
             reviewDoneSet.delete(key);
-            reviewDoneSet.delete(key.replace(/_moved_\d{4}-\d{2}-\d{2}$/, '')); // movedKey 派生も念のため削除
+            reviewDoneSet.delete(key.replace(MOVED_KEY_SUFFIX_RE, '')); // movedKey 派生も念のため削除
           });
         });
       dailyProgress = dailyProgress.filter(
@@ -1843,10 +1921,10 @@ function buildWordReviewPreviewHtml(dateStr, wordRecords) {
 
     const slotsHtml = (entry.intervals || DEFAULT_INTERVALS).map(n => {
       const d = addDays(parseISO(dateStr), n);
-      const wdLabel  = ['日','月','火','水','木','金','土'][d.getDay()];
+      const wdLabel  = WEEKDAYS[d.getDay()];
       const dispDate = `${d.getMonth()+1}/${d.getDate()}（${wdLabel}）`;
       const tier      = getIntervalTier(n);
-      const tierLabel = ['', 'Lv.1 初期', 'Lv.2 定着', 'Lv.3 強化', 'Lv.4 仕上げ'][tier];
+      const tierLabel = getIntervalTierStyle(tier).label;
       return `<span class="progressed-review-slot slot-t${tier}">
         <span class="slot-date">${dispDate}</span>
         <span class="slot-lv">${n}日後 ${tierLabel}</span>
@@ -1889,7 +1967,7 @@ function handleProgressClear(dateStr) {
     .map(p => p.reviewKey);
   reviewKeysToRemove.forEach(k => {
     reviewDoneSet.delete(k);
-    reviewDoneSet.delete(k.replace(/_moved_\d{4}-\d{2}-\d{2}$/, '')); // 追加: originalKey も削除
+    reviewDoneSet.delete(k.replace(MOVED_KEY_SUFFIX_RE, '')); // 追加: originalKey も削除
   });
 
   // ② word/book 型の進捗記録から buildProgressReviews() で生成されるレビューキーも除去する。
@@ -1912,7 +1990,7 @@ function handleProgressClear(dateStr) {
       intervals.forEach(n => {
         const key = `${prefix}_prog_${resolved}_${p.date}_${p.plannedStart}_${n}`;
         reviewDoneSet.delete(key);
-        reviewDoneSet.delete(key.replace(/_moved_\d{4}-\d{2}-\d{2}$/, '')); // movedKey 派生も念のため削除
+        reviewDoneSet.delete(key.replace(MOVED_KEY_SUFFIX_RE, '')); // movedKey 派生も念のため削除
       });
     });
 
@@ -1974,7 +2052,6 @@ function renderRefTodayCard() {
     // 未完了を先頭、完了済みを後ろに並べる
     const sorted = [...todayReviews].sort((a, b) => (a.done ? 1 : 0) - (b.done ? 1 : 0));
     const itemsHtml = sorted.map(r => {
-      const ts = getIntervalTierStyle(r.interval);
       // STEP 8: 復習バッジを統一形式で表示（🔁 復習 Lv.X [N日後] + 🔄 [遅れN日]）
       const reviewBadge = buildReviewBadgeHtml(r.interval, r.delayedDays);
       return `<div class="ref-review-item${r.done ? ' is-done' : ''}">
@@ -2002,101 +2079,149 @@ function renderAll(){
   renderTodayNew();
 }
 
-// ── 単語スケジュールの編集モード ──────────────────────────────
+// ── フォーム状態管理の共通ファクトリ（単語・参考書共通）────────────────
+// getXxxFormState / setXxxFormState / startEditXxx / exitXxxEditMode / cancelEditXxx の
+// 5関数は、DOM要素IDのプレフィックス（refの有無）以外ほぼ同一処理のため、
+// MATERIAL_CONFIGS と同じ設計思想でIDマッピング等を cfg として渡すファクトリに統合する。
+function createFormController(cfg){
+  const controller = {
+    // 現在のフォーム入力内容を取得（キャンセル時の復元・編集開始時の退避に使用）
+    getFormState(){
+      return {
+        planMode: document.querySelector(`input[name="${cfg.planModeName}"]:checked`)?.value || 'byRange',
+        bookName: document.getElementById(cfg.fields.bookName)?.value ?? '',
+        startNum: document.getElementById(cfg.fields.startNum).value,
+        endNum: document.getElementById(cfg.fields.endNum).value,
+        startDate: document.getElementById(cfg.fields.startDate).value,
+        endDate: document.getElementById(cfg.fields.endDate).value,
+        amountPerDay: document.getElementById(cfg.fields.amountPerDay).value,
+        weekdays: getCheckedValues(cfg.fields.weekdayRow),
+        intervals: getCheckedValues(cfg.fields.intervalRow),
+      };
+    },
+    // スナップショット（または既存エントリの値）をフォームへ反映する
+    setFormState(state){
+      if (!state) return;
+      const modeRadio = document.querySelector(`input[name="${cfg.planModeName}"][value="${state.planMode}"]`);
+      if (modeRadio) {
+        modeRadio.checked = true;
+        modeRadio.dispatchEvent(new Event('change')); // 表示切替（既存の change ハンドラを再利用）
+      }
+      const bookNameEl = document.getElementById(cfg.fields.bookName);
+      if (bookNameEl) bookNameEl.value = state.bookName ?? '';
+      document.getElementById(cfg.fields.startNum).value = state.startNum ?? '';
+      document.getElementById(cfg.fields.endNum).value = state.endNum ?? '';
+      document.getElementById(cfg.fields.startDate).value = state.startDate ?? '';
+      document.getElementById(cfg.fields.endDate).value = state.endDate ?? '';
+      document.getElementById(cfg.fields.amountPerDay).value = state.amountPerDay ?? '';
+      setCheckedValues(cfg.fields.weekdayRow, state.weekdays || []);
+      setCheckedValues(cfg.fields.intervalRow, state.intervals || []);
+    },
+    // 「編集」ボタン押下時：フォームに既存エントリの内容を読み込み、編集モードに入る
+    startEdit(id){
+      const entry = cfg.getEntries().find(e => e.id === id);
+      if (!entry) return;
 
-// 現在のフォーム入力内容をスナップショットとして取得（キャンセル時の復元用）
-function getPlanFormState(){
-  return {
-    planMode: document.querySelector('input[name="planMode"]:checked')?.value || 'byRange',
-    bookName: document.getElementById('wordBookName')?.value ?? '',
-    startNum: document.getElementById('startNum').value,
-    endNum: document.getElementById('endNum').value,
-    startDate: document.getElementById('startDate').value,
-    endDate: document.getElementById('endDate').value,
-    amountPerDay: document.getElementById('amountPerDay').value,
-    weekdays: getCheckedValues('weekdayRow'),
-    intervals: getCheckedValues('intervalRow'),
+      // 今フォームに入っている内容を退避（キャンセルされた場合に戻すため）
+      cfg.setSnapshot(controller.getFormState());
+
+      controller.setFormState({
+        planMode: entry.planMode,
+        bookName: entry.bookName,
+        startNum: entry.startNum,
+        endNum: entry.endNum,
+        startDate: entry.startDate,
+        endDate: entry.endDate,
+        amountPerDay: entry.amountPerDay,
+        weekdays: entry.weekdays,
+        intervals: entry.intervals,
+      });
+
+      cfg.setEditingId(id);
+      const errorEl = document.getElementById(cfg.errorElId);
+      if (errorEl) errorEl.textContent = '';
+
+      const actionBtn = document.getElementById(cfg.actionBtnId);
+      if (actionBtn) actionBtn.textContent = '✅ 変更を保存';
+      const cancelBtn = document.getElementById(cfg.cancelBtnId);
+      if (cancelBtn) cancelBtn.style.display = '';
+
+      // 設定パネルを開いてフォームまでスクロール（閉じていても編集内容が見えるように）
+      let scrollTarget = null;
+      cfg.detailsIds.forEach((detailsId, idx) => {
+        const detailsEl = document.getElementById(detailsId);
+        if (detailsEl) {
+          detailsEl.open = true;
+          if (idx === 0) scrollTarget = detailsEl;
+        }
+      });
+      scrollTarget?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+      cfg.renderList(); // 編集中の行をハイライトするため再描画
+    },
+    // ボタン表示・状態だけを新規追加モードへ戻す（フォーム内容には触れない）
+    exitEditMode(){
+      cfg.setEditingId(null);
+      cfg.setSnapshot(null);
+      const actionBtn = document.getElementById(cfg.actionBtnId);
+      if (actionBtn) actionBtn.textContent = cfg.defaultActionText;
+      const cancelBtn = document.getElementById(cfg.cancelBtnId);
+      if (cancelBtn) cancelBtn.style.display = 'none';
+    },
+    // 「編集をキャンセル」ボタン押下時：フォームを編集前の状態に戻す
+    cancelEdit(){
+      const snapshot = cfg.getSnapshot();
+      controller.exitEditMode();
+      controller.setFormState(snapshot);
+      cfg.renderList();
+    },
   };
+  return controller;
 }
 
-// スナップショット（または既存エントリの値）をフォームへ反映する
-function setPlanFormState(state){
-  if (!state) return;
-  const modeRadio = document.querySelector(`input[name="planMode"][value="${state.planMode}"]`);
-  if (modeRadio) {
-    modeRadio.checked = true;
-    modeRadio.dispatchEvent(new Event('change')); // 表示切替（既存の change ハンドラを再利用）
-  }
-  const bookNameEl = document.getElementById('wordBookName');
-  if (bookNameEl) bookNameEl.value = state.bookName ?? '';
-  document.getElementById('startNum').value = state.startNum ?? '';
-  document.getElementById('endNum').value = state.endNum ?? '';
-  document.getElementById('startDate').value = state.startDate ?? '';
-  document.getElementById('endDate').value = state.endDate ?? '';
-  document.getElementById('amountPerDay').value = state.amountPerDay ?? '';
-  setCheckedValues('weekdayRow', state.weekdays || []);
-  setCheckedValues('intervalRow', state.intervals || []);
-}
+// ── 単語スケジュールの編集モード ──────────────────────────────
+const wordFormController = createFormController({
+  planModeName: 'planMode',
+  fields: {
+    bookName: 'wordBookName',
+    startNum: 'startNum',
+    endNum: 'endNum',
+    startDate: 'startDate',
+    endDate: 'endDate',
+    amountPerDay: 'amountPerDay',
+    weekdayRow: 'weekdayRow',
+    intervalRow: 'intervalRow',
+  },
+  getEntries: () => entries,
+  setEditingId: (id) => { editingEntryId = id; },
+  getSnapshot: () => entryFormSnapshot,
+  setSnapshot: (snapshot) => { entryFormSnapshot = snapshot; },
+  errorElId: 'errorMsg',
+  actionBtnId: 'addBtn',
+  defaultActionText: 'この範囲をスケジュールに追加',
+  cancelBtnId: 'cancelEditBtn',
+  detailsIds: ['setup', 'rangeRegisterDetails'], // ★①範囲登録の折りたたみも含めて開く
+  renderList: () => renderEntryList(),
+});
 
-// 「編集」ボタン押下時：フォームに既存エントリの内容を読み込み、編集モードに入る
-function startEditEntry(id){
-  const entry = entries.find(e => e.id === id);
-  if (!entry) return;
+function getPlanFormState(){ return wordFormController.getFormState(); }
+function setPlanFormState(state){ wordFormController.setFormState(state); }
+function startEditEntry(id){ wordFormController.startEdit(id); }
+function exitEntryEditMode(){ wordFormController.exitEditMode(); }
+function cancelEditEntry(){ wordFormController.cancelEdit(); }
 
-  // 今フォームに入っている内容を退避（キャンセルされた場合に戻すため）
-  entryFormSnapshot = getPlanFormState();
+// ── 登録処理（バリデーション＋保存）の共通化 ────────────────────────
+// handleAdd（単語）と saveRefPlanBtn クリックハンドラ（参考書）は、
+// エラー表示・必須チェック・byAmount/byRange分岐・編集/新規判定のロジックが
+// ほぼ同一のため、共通保存関数 handleSaveEntry に処理の骨組みを抽出する。
+// 検証ルール・入力値の読み方は型ごとに差があるため、それぞれの
+// buildAndValidateXxxEntry に閉じ込め、cfg のフックとして渡す。
 
-  setPlanFormState({
-    planMode: entry.planMode,
-    bookName: entry.bookName,
-    startNum: entry.startNum,
-    endNum: entry.endNum,
-    startDate: entry.startDate,
-    endDate: entry.endDate,
-    amountPerDay: entry.amountPerDay,
-    weekdays: entry.weekdays,
-    intervals: entry.intervals,
-  });
-
-  editingEntryId = id;
-  const errorEl = document.getElementById('errorMsg');
-  if (errorEl) errorEl.textContent = '';
-
-  const addBtn = document.getElementById('addBtn');
-  if (addBtn) addBtn.textContent = '✅ 変更を保存';
-  const cancelBtn = document.getElementById('cancelEditBtn');
-  if (cancelBtn) cancelBtn.style.display = '';
-
-  // 設定パネルを開いてフォームまでスクロール（閉じていても編集内容が見えるように）
-  const setupDetails = document.getElementById('setup');
-  if (setupDetails) setupDetails.open = true;
-  // ★①範囲登録の折りたたみも、ユーザーが閉じていた場合に備えて開いておく
-  const rangeDetails = document.getElementById('rangeRegisterDetails');
-  if (rangeDetails) rangeDetails.open = true;
-  setupDetails?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-
-  renderEntryList(); // 編集中の行をハイライトするため再描画
-}
-
-// ボタン表示・状態だけを新規追加モードへ戻す（フォーム内容には触れない）
-function exitEntryEditMode(){
-  editingEntryId = null;
-  entryFormSnapshot = null;
-  const addBtn = document.getElementById('addBtn');
-  if (addBtn) addBtn.textContent = 'この範囲をスケジュールに追加';
-  const cancelBtn = document.getElementById('cancelEditBtn');
-  if (cancelBtn) cancelBtn.style.display = 'none';
-}
-
-// 「編集をキャンセル」ボタン押下時：フォームを編集前の状態に戻す
-function cancelEditEntry(){
-  const snapshot = entryFormSnapshot;
-  exitEntryEditMode();
-  setPlanFormState(snapshot);
-  renderEntryList();
-}
-
-async function handleAdd(){
+/**
+ * フォーム入力を検証し、保存用フィールド一式を返す（単語用）。
+ * 検証NGの場合は showError で表示のうえ null を返す。
+ */
+function buildAndValidateWordEntry(showError){
   // ★ 参考書と設計を共通化：教材名（任意項目、未入力なら「単語」として扱う）
   const bookName = document.getElementById('wordBookName')?.value.trim() || '';
   const startNum = Number(document.getElementById('startNum').value);
@@ -2105,42 +2230,73 @@ async function handleAdd(){
   const endDate = document.getElementById('endDate').value; // 追加
   const weekdays = getCheckedValues('weekdayRow');
   const intervals = getCheckedValues('intervalRow');
-  const errorEl = document.getElementById('errorMsg');
   const planMode = document.querySelector('input[name="planMode"]:checked').value;
   const amountPerDay = Number(document.getElementById('amountPerDay').value);
-  const showError = (msg) => { if (errorEl) errorEl.textContent = msg; else alert(msg); };
-  if (errorEl) errorEl.textContent = '';
 
   if(!startNum || !endNum || endNum < startNum){
-    showError('開始番号・終了番号を正しく入力してください（終了番号は開始番号以上）。'); return;
+    showError('開始番号・終了番号を正しく入力してください（終了番号は開始番号以上）。'); return null;
   }
-  if(!startDate){ showError('開始日を選択してください。'); return; }
-  
+  if(!startDate){ showError('開始日を選択してください。'); return null; }
+
   // 終了日のバリデーションを追加
   if(planMode === 'byRange') {
-    if(!endDate){ showError('終了日を選択してください。'); return; }
-    if(new Date(endDate) < new Date(startDate)){ showError('終了日は開始日以降の日付にしてください。'); return; }
+    if(!endDate){ showError('終了日を選択してください。'); return null; }
+    if(new Date(endDate) < new Date(startDate)){ showError('終了日は開始日以降の日付にしてください。'); return null; }
   }
 
-  if(weekdays.length === 0){ showError('学習する曜日を1つ以上選んでください。'); return; }
-  if(intervals.length === 0){ showError('復習のタイミングを1つ以上選んでください。'); return; }
+  if(weekdays.length === 0){ showError('学習する曜日を1つ以上選んでください。'); return null; }
+  if(intervals.length === 0){ showError('復習のタイミングを1つ以上選んでください。'); return null; }
   if(planMode === 'byAmount' && (!amountPerDay || amountPerDay <= 0)){
-    showError('1日あたりの単語数を正しく入力してください。'); return;
+    showError('1日あたりの単語数を正しく入力してください。'); return null;
   }
 
-  if (editingEntryId) {
+  return { newFields: { bookName, startNum, endNum, startDate, endDate, weekdays, intervals, planMode, amountPerDay } };
+}
+
+/**
+ * 登録フォームの共通保存処理（単語・参考書共通）。
+ * エラー表示のクリア → バリデーション → 編集/新規判定 → 保存 → 再描画、という
+ * 共通の流れを1本化し、型固有の差分は cfg のフィールド・フック関数に委譲する。
+ */
+async function handleSaveEntry(cfg){
+  const errorEl = document.getElementById(cfg.errorElId);
+  if (errorEl) errorEl.textContent = '';
+  const showError = (msg) => { if (errorEl) errorEl.textContent = msg; else alert(msg); };
+
+  const built = cfg.buildAndValidate(showError);
+  if (!built) return; // 検証エラー（showError内で表示済み）
+
+  const { newFields } = built;
+  const list = cfg.getList();
+  const editingId = cfg.getEditingId();
+
+  if (editingId) {
     // 編集モード：IDを維持したまま内容だけ差し替える
     // （IDを変えると復習履歴・進捗記録との紐付けが切れてしまうため）
-    entries = entries.map(e => e.id === editingEntryId
-      ? { ...e, bookName, startNum, endNum, startDate, endDate, weekdays, intervals, planMode, amountPerDay }
-      : e);
-    exitEntryEditMode();
+    cfg.setList(list.map(item => item.id === editingId ? cfg.applyEdit(item, newFields) : item));
+    cfg.exitEditMode();
   } else {
-    // entryオブジェクトに endDate を追加
-    entries.push({ id: genId('e_'), bookName, startNum, endNum, startDate, endDate, weekdays, intervals, planMode, amountPerDay });
+    cfg.setList([...list, { ...newFields, id: genId(cfg.idPrefix) }]);
   }
-  await saveEntries();
-  renderAll();
+
+  await cfg.save();
+  cfg.render();
+  cfg.afterSave?.();
+}
+
+async function handleAdd(){
+  await handleSaveEntry({
+    errorElId: 'errorMsg',
+    buildAndValidate: buildAndValidateWordEntry,
+    getList: () => entries,
+    setList: (arr) => { entries = arr; },
+    getEditingId: () => editingEntryId,
+    exitEditMode: exitEntryEditMode,
+    applyEdit: (item, newFields) => ({ ...item, ...newFields }),
+    idPrefix: 'e_',
+    save: saveEntries,
+    render: renderAll,
+  });
 }
 
 async function handleReset(){
@@ -2286,7 +2442,6 @@ function renderLeechManagement(){
       <tr>
        <td>
         ${escapeHtml(w.word)}
-        <button class="speak-btn" data-word="${escapeHtml(w.word)}" style="background:none; border:none; cursor:pointer; font-size:1rem; margin-left:6px;">🔊</button>
         ${w.missCount >= LEECH_WARN_THRESHOLD ? '<span class="badge-warn">要注意</span>' : ''}
        </td>
        <td>${w.nextReviewDate}</td>
@@ -2294,9 +2449,6 @@ function renderLeechManagement(){
        <td><button class="mini-del" data-id="${w.id}">削除</button></td>
       </tr>`).join('')}
     `;
-    activeTable.querySelectorAll('.speak-btn').forEach(btn => {
-      btn.addEventListener('click', () => speakWord(btn.dataset.word));
-    });
     activeTable.querySelectorAll('.mini-del').forEach(btn => {
       btn.addEventListener('click', () => handleLeechDelete(btn.dataset.id));
     });
@@ -2642,15 +2794,6 @@ function finishTest() {
   `).join('');
 }
 
-/* ---------- TTS (読み上げ機能) ---------- */
-function speakWord(text) {
-  window.speechSynthesis.cancel(); // 連続読み上げを防ぐ
-  const uttr = new SpeechSynthesisUtterance(text);
-  uttr.lang = 'en-US'; // 英語の読み上げ設定
-  uttr.rate = 0.9;     // 少しだけゆっくりにする（聞き取りやすく）
-  window.speechSynthesis.speak(uttr);
-}
-
 // モーダルを閉じる処理
 document.getElementById('closeTestBtn')?.addEventListener('click', () => {
   document.getElementById('testModal').classList.remove('active');
@@ -2782,97 +2925,35 @@ window.addEventListener('DOMContentLoaded', () => {
   // ルートで既にカバーされているため、ここでの呼び出しは不要（二重実行・競合防止）
 
   // ③ 「スケジュールを登録」ボタンが押された時の処理
+  // バリデーション・保存・再描画の骨組みは handleSaveEntry（単語と共通）に委譲し、
+  // ここでは参考書固有の検証ロジックと完了後処理だけを渡す。
   const saveRefPlanBtn = document.getElementById('saveRefPlanBtn');
   if (saveRefPlanBtn) {
     saveRefPlanBtn.addEventListener('click', () => {
-      const errorEl = document.getElementById('refErrorMsg');
-      if (errorEl) errorEl.textContent = '';
+      handleSaveEntry({
+        errorElId: 'refErrorMsg',
+        buildAndValidate: buildAndValidateRefEntry,
+        getList: () => refEntries,
+        setList: (arr) => { refEntries = arr; },
+        getEditingId: () => editingRefEntryId,
+        exitEditMode: exitRefEditMode,
+        // 参考書は編集時、旧プランをスプレッドせず新しいフィールド一式に置き換える
+        // （byAmount/byRangeの切替時に古いendDate/amountPerDayが残らないようにするため）
+        applyEdit: (item, newFields) => ({ ...newFields, id: item.id }),
+        idPrefix: 'ref_',
+        save: saveRefEntries,
+        render: renderRefSchedule,
+        afterSave: () => {
+          // 入力欄をクリア（教材名・ページ番号のみ）
+          document.getElementById('refBookName').value = '';
+          document.getElementById('refStartPage').value = '';
+          document.getElementById('refEndPage').value = '';
 
-      const bookName = document.getElementById('refBookName').value.trim();
-      const startNum = parseInt(document.getElementById('refStartPage').value, 10);
-      const endNum = parseInt(document.getElementById('refEndPage').value, 10);
-      const startDate = document.getElementById('refStartDate').value;
-      const planMode = document.querySelector('input[name="refPlanMode"]:checked').value;
-      const weekdays = getCheckedValues('refWeekdayRow');
-      const intervals = getCheckedValues('refIntervalRow');
-
-      const showError = (msg) => { if (errorEl) errorEl.textContent = msg; else alert(msg); };
-
-      if (!bookName || isNaN(startNum) || isNaN(endNum) || !startDate) {
-        showError('すべての項目を正しく入力してください。');
-        return;
-      }
-      if (startNum > endNum) {
-        showError('開始ページは終了ページ以下の数値を入力してください。');
-        return;
-      }
-      if (weekdays.length === 0) {
-        showError('学習する曜日を1つ以上選んでください。');
-        return;
-      }
-      if (intervals.length === 0) {
-        showError('復習のタイミングを1つ以上選んでください。');
-        return;
-      }
-
-      const newPlan = {
-        // id は下部で「新規なら新規発行／編集中なら既存IDを維持」して設定する
-        bookName: bookName,
-        startNum: startNum,
-        endNum: endNum,
-        startDate: startDate,
-        weekdays: weekdays,
-        intervals: intervals,
-        planMode: planMode
-      };
-
-      if (planMode === 'byAmount') {
-        const amount = parseInt(document.getElementById('refAmountPerDay').value, 10);
-        if (!amount || amount <= 0) {
-          showError('1日あたり進める量を正しく入力してください。');
-          return;
-        }
-        newPlan.amountPerDay = amount;
-      } else {
-        const endDate = document.getElementById('refEndDate').value;
-        if (!endDate) {
-          showError('終了日を選択してください。');
-          return;
-        }
-        if (parseISO(endDate) < parseISO(startDate)) {
-          showError('終了日は開始日以降の日付にしてください。');
-          return;
-        }
-        newPlan.endDate = endDate;
-      }
-
-      // 事前にスケジュールを計算し、該当日がなければ登録前に知らせる
-      if (computeRefSchedule(newPlan).length === 0) {
-        showError('指定した期間・曜日では学習日がありません。設定を見直してください。');
-        return;
-      }
-
-      if (editingRefEntryId) {
-        // 編集モード：IDを維持したまま内容だけ差し替える
-        // （IDを変えると復習履歴・進捗記録との紐付けが切れてしまうため）
-        newPlan.id = editingRefEntryId;
-        refEntries = refEntries.map(p => p.id === editingRefEntryId ? newPlan : p);
-        exitRefEditMode();
-      } else {
-        newPlan.id = genId('ref_');
-        refEntries.push(newPlan);
-      }
-      saveRefEntries();
-      renderRefSchedule(); // 画面を更新
-
-      // 入力欄をクリア（教材名・ページ番号のみ）
-      document.getElementById('refBookName').value = '';
-      document.getElementById('refStartPage').value = '';
-      document.getElementById('refEndPage').value = '';
-
-      // 登録完了後：設定アコーディオンを閉じて「今日の確認」に注目させる
-      const settingDetails = document.getElementById('refSettingDetails');
-      if (settingDetails) settingDetails.open = false;
+          // 登録完了後：設定アコーディオンを閉じて「今日の確認」に注目させる
+          const settingDetails = document.getElementById('refSettingDetails');
+          if (settingDetails) settingDetails.open = false;
+        },
+      });
     });
   }
 
@@ -2883,6 +2964,75 @@ window.addEventListener('DOMContentLoaded', () => {
 // planMode === 'byAmount' : 1日あたりの量を指定 → 終了日は自動計算
 // planMode === 'byRange'  : 開始日〜終了日と学習曜日を指定 → 1日あたりの量は自動計算
 // ② データの保存と読み込み
+/**
+ * フォーム入力を検証し、保存用フィールド一式を返す（参考書用）。
+ * 検証NGの場合は showError で表示のうえ null を返す。
+ */
+function buildAndValidateRefEntry(showError){
+  const bookName = document.getElementById('refBookName').value.trim();
+  const startNum = parseInt(document.getElementById('refStartPage').value, 10);
+  const endNum = parseInt(document.getElementById('refEndPage').value, 10);
+  const startDate = document.getElementById('refStartDate').value;
+  const planMode = document.querySelector('input[name="refPlanMode"]:checked').value;
+  const weekdays = getCheckedValues('refWeekdayRow');
+  const intervals = getCheckedValues('refIntervalRow');
+
+  if (!bookName || isNaN(startNum) || isNaN(endNum) || !startDate) {
+    showError('すべての項目を正しく入力してください。');
+    return null;
+  }
+  if (startNum > endNum) {
+    showError('開始ページは終了ページ以下の数値を入力してください。');
+    return null;
+  }
+  if (weekdays.length === 0) {
+    showError('学習する曜日を1つ以上選んでください。');
+    return null;
+  }
+  if (intervals.length === 0) {
+    showError('復習のタイミングを1つ以上選んでください。');
+    return null;
+  }
+
+  const newPlan = {
+    bookName: bookName,
+    startNum: startNum,
+    endNum: endNum,
+    startDate: startDate,
+    weekdays: weekdays,
+    intervals: intervals,
+    planMode: planMode
+  };
+
+  if (planMode === 'byAmount') {
+    const amount = parseInt(document.getElementById('refAmountPerDay').value, 10);
+    if (!amount || amount <= 0) {
+      showError('1日あたり進める量を正しく入力してください。');
+      return null;
+    }
+    newPlan.amountPerDay = amount;
+  } else {
+    const endDate = document.getElementById('refEndDate').value;
+    if (!endDate) {
+      showError('終了日を選択してください。');
+      return null;
+    }
+    if (parseISO(endDate) < parseISO(startDate)) {
+      showError('終了日は開始日以降の日付にしてください。');
+      return null;
+    }
+    newPlan.endDate = endDate;
+  }
+
+  // 事前にスケジュールを計算し、該当日がなければ登録前に知らせる
+  if (computeRefSchedule(newPlan).length === 0) {
+    showError('指定した期間・曜日では学習日がありません。設定を見直してください。');
+    return null;
+  }
+
+  return { newFields: newPlan };
+}
+
 function saveRefEntries() {
   saveToStorage(REF_STORAGE_KEY, refEntries);
 }
@@ -2899,141 +3049,77 @@ function loadRefEntries() {
 
 // ④ 参考書スケジュール：登録済みプランの一覧表示（単語タブのentryListと同じ考え方）
 function renderRefEntryList(){
-  const list = document.getElementById('refEntryList');
-  if(!list) return;
-  list.innerHTML = '';
-  if(refEntries.length === 0) return;
+  renderEntryCardList({
+    listId: 'refEntryList',
+    getItems: () => refEntries,
+    getEditingId: () => editingRefEntryId,
+    editBtnExtraClass: 'ref-edit-btn',
+    delBtnExtraClass: 'ref-del-btn',
+    editBtnSelector: '.ref-edit-btn',
+    delBtnSelector: '.ref-del-btn',
+    buildLabel: (plan) => `${escapeHtml(plan.bookName)}　${plan.startNum}〜${plan.endNum}`,
+    buildMeta: (plan) => {
+      const wdLabel = (plan.weekdays || []).slice().sort((a,b)=>a-b).map(i => WEEKDAYS[i]).join('・');
+      const chunks = computeRefSchedule(plan);
 
-  refEntries.forEach(plan => {
-    const wdLabel = (plan.weekdays || []).slice().sort((a,b)=>a-b).map(i => WEEKDAYS[i]).join('・');
-    const chunks = computeRefSchedule(plan);
-
-    let calcInfo = '';
-    if(chunks.length > 0){
-      if(plan.planMode === 'byAmount'){
-        const last = parseISO(chunks[chunks.length - 1].date);
-        calcInfo = `1日あたり ${plan.amountPerDay} ／ 終了予定日 ${last.getMonth()+1}/${last.getDate()}（自動計算）`;
+      let calcInfo = '';
+      if(chunks.length > 0){
+        if(plan.planMode === 'byAmount'){
+          const last = parseISO(chunks[chunks.length - 1].date);
+          calcInfo = `1日あたり ${plan.amountPerDay} ／ 終了予定日 ${last.getMonth()+1}/${last.getDate()}（自動計算）`;
+        } else {
+          const amounts = chunks.map(c => c.rangeEnd - c.rangeStart + 1);
+          const minA = Math.min(...amounts), maxA = Math.max(...amounts);
+          calcInfo = (minA === maxA) ? `1日あたり ${minA}（自動計算）` : `1日あたり ${minA}〜${maxA}（自動計算）`;
+        }
       } else {
-        const amounts = chunks.map(c => c.rangeEnd - c.rangeStart + 1);
-        const minA = Math.min(...amounts), maxA = Math.max(...amounts);
-        calcInfo = (minA === maxA) ? `1日あたり ${minA}（自動計算）` : `1日あたり ${minA}〜${maxA}（自動計算）`;
+        calcInfo = '該当する学習日がありません';
       }
-    } else {
-      calcInfo = '該当する学習日がありません';
-    }
-
-    const item = document.createElement('div');
-    item.className = 'entry-item' + (plan.id === editingRefEntryId ? ' is-editing' : '');
-    item.innerHTML = `
-      <div>
-        <span class="rng">${escapeHtml(plan.bookName)}　${plan.startNum}〜${plan.endNum}</span>
-        <div class="meta">開始日 ${plan.startDate} ／ 学習日: ${wdLabel || '―'} ／ ${calcInfo} ／ 復習: ${(plan.intervals ?? []).join('・')}日後</div>
-      </div>
-      <div class="entry-actions">
-        <button class="edit-btn ref-edit-btn" data-id="${plan.id}">編集</button>
-        <button class="del-btn ref-del-btn" data-id="${plan.id}">削除</button>
-      </div>
-    `;
-    list.appendChild(item);
-  });
-
-  list.querySelectorAll('.ref-edit-btn').forEach(btn => {
-    btn.addEventListener('click', () => startEditRefEntry(btn.dataset.id));
-  });
-  list.querySelectorAll('.ref-del-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
+      return `開始日 ${plan.startDate} ／ 学習日: ${wdLabel || '―'} ／ ${calcInfo} ／ 復習: ${(plan.intervals ?? []).join('・')}日後`;
+    },
+    onEdit: (id) => startEditRefEntry(id),
+    onDelete: (id) => {
       if (!confirm('この参考書のスケジュールを削除しますか？')) return;
       // 編集中の項目が削除された場合は編集モードを解除しておく（不整合防止）
-      if (editingRefEntryId === btn.dataset.id) exitRefEditMode();
-      refEntries = refEntries.filter(p => p.id !== btn.dataset.id);
+      if (editingRefEntryId === id) exitRefEditMode();
+      refEntries = refEntries.filter(p => p.id !== id);
       saveRefEntries();
       renderRefSchedule();
-    });
+    },
   });
 }
 
 // ── 参考書スケジュールの編集モード ────────────────────────────
+// 単語版と同じ createFormController ファクトリを、参考書用のID・状態変数で利用する。
+const refFormController = createFormController({
+  planModeName: 'refPlanMode',
+  fields: {
+    bookName: 'refBookName',
+    startNum: 'refStartPage',
+    endNum: 'refEndPage',
+    startDate: 'refStartDate',
+    endDate: 'refEndDate',
+    amountPerDay: 'refAmountPerDay',
+    weekdayRow: 'refWeekdayRow',
+    intervalRow: 'refIntervalRow',
+  },
+  getEntries: () => refEntries,
+  setEditingId: (id) => { editingRefEntryId = id; },
+  getSnapshot: () => refFormSnapshot,
+  setSnapshot: (snapshot) => { refFormSnapshot = snapshot; },
+  errorElId: 'refErrorMsg',
+  actionBtnId: 'saveRefPlanBtn',
+  defaultActionText: 'スケジュールを生成して登録',
+  cancelBtnId: 'cancelRefEditBtn',
+  detailsIds: ['refSettingDetails'],
+  renderList: () => renderRefEntryList(),
+});
 
-function getRefFormState(){
-  return {
-    planMode: document.querySelector('input[name="refPlanMode"]:checked')?.value || 'byRange',
-    bookName: document.getElementById('refBookName').value,
-    startNum: document.getElementById('refStartPage').value,
-    endNum: document.getElementById('refEndPage').value,
-    startDate: document.getElementById('refStartDate').value,
-    endDate: document.getElementById('refEndDate').value,
-    amountPerDay: document.getElementById('refAmountPerDay').value,
-    weekdays: getCheckedValues('refWeekdayRow'),
-    intervals: getCheckedValues('refIntervalRow'),
-  };
-}
-
-function setRefFormState(state){
-  if (!state) return;
-  const modeRadio = document.querySelector(`input[name="refPlanMode"][value="${state.planMode}"]`);
-  if (modeRadio) {
-    modeRadio.checked = true;
-    modeRadio.dispatchEvent(new Event('change'));
-  }
-  document.getElementById('refBookName').value = state.bookName ?? '';
-  document.getElementById('refStartPage').value = state.startNum ?? '';
-  document.getElementById('refEndPage').value = state.endNum ?? '';
-  document.getElementById('refStartDate').value = state.startDate ?? '';
-  document.getElementById('refEndDate').value = state.endDate ?? '';
-  document.getElementById('refAmountPerDay').value = state.amountPerDay ?? '';
-  setCheckedValues('refWeekdayRow', state.weekdays || []);
-  setCheckedValues('refIntervalRow', state.intervals || []);
-}
-
-function startEditRefEntry(id){
-  const plan = refEntries.find(p => p.id === id);
-  if (!plan) return;
-
-  refFormSnapshot = getRefFormState();
-
-  setRefFormState({
-    planMode: plan.planMode,
-    bookName: plan.bookName,
-    startNum: plan.startNum,
-    endNum: plan.endNum,
-    startDate: plan.startDate,
-    endDate: plan.endDate,
-    amountPerDay: plan.amountPerDay,
-    weekdays: plan.weekdays,
-    intervals: plan.intervals,
-  });
-
-  editingRefEntryId = id;
-  const errorEl = document.getElementById('refErrorMsg');
-  if (errorEl) errorEl.textContent = '';
-
-  const saveBtn = document.getElementById('saveRefPlanBtn');
-  if (saveBtn) saveBtn.textContent = '✅ 変更を保存';
-  const cancelBtn = document.getElementById('cancelRefEditBtn');
-  if (cancelBtn) cancelBtn.style.display = '';
-
-  const settingDetails = document.getElementById('refSettingDetails');
-  if (settingDetails) settingDetails.open = true;
-  settingDetails?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-
-  renderRefEntryList();
-}
-
-function exitRefEditMode(){
-  editingRefEntryId = null;
-  refFormSnapshot = null;
-  const saveBtn = document.getElementById('saveRefPlanBtn');
-  if (saveBtn) saveBtn.textContent = 'スケジュールを生成して登録';
-  const cancelBtn = document.getElementById('cancelRefEditBtn');
-  if (cancelBtn) cancelBtn.style.display = 'none';
-}
-
-function cancelEditRefEntry(){
-  const snapshot = refFormSnapshot;
-  exitRefEditMode();
-  setRefFormState(snapshot);
-  renderRefEntryList();
-}
+function getRefFormState(){ return refFormController.getFormState(); }
+function setRefFormState(state){ refFormController.setFormState(state); }
+function startEditRefEntry(id){ refFormController.startEdit(id); }
+function exitRefEditMode(){ refFormController.exitEditMode(); }
+function cancelEditRefEntry(){ refFormController.cancelEdit(); }
 
 // ⑤ 参考書タブ全体の再描画（登録リスト＋今日やること）
 function renderRefSchedule() {
