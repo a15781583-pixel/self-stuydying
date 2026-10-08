@@ -898,7 +898,10 @@ function renderEntryList(){
       } else {
         modeText = entry.endDate ? `${entry.startDate} 〜 ${entry.endDate}` : `開始日 ${entry.startDate} (1週間)`;
       }
-      return `${modeText} ／ 学習日: ${wdLabel} ／ 復習: ${(entry.intervals ?? []).join('・')}日後`;
+      // 検証追加前に登録された分も気づけるよう、学習日が1日もない登録には警告を付ける（参考書側の一覧と同様）
+      const noStudyDayWarn = computeChunksForEntry(entry).length === 0
+        ? ' ／ ⚠️ 該当する学習日がありません（編集で期間・曜日を見直してください）' : '';
+      return `${modeText} ／ 学習日: ${wdLabel} ／ 復習: ${(entry.intervals ?? []).join('・')}日後${noStudyDayWarn}`;
     },
     onEdit: (id) => startEditEntry(id),
     onDelete: async (id) => {
@@ -945,6 +948,23 @@ function renderMergedSchedule(containerId){
   const spanDays = Math.round((maxDate - minDate) / 86400000) + 1;
   let truncated = false;
   if(spanDays > MAX_DAYS){ maxDate = addDays(minDate, MAX_DAYS - 1); truncated = true; }
+
+  // 表示期間（45日）より先にある予定の件数を数えておく（データは消えていないことを利用者に伝えるため）。
+  // 日付はISO形式(YYYY-MM-DD)なので文字列比較で大小判定できる。
+  let hiddenNoticeHtml = '';
+  if(truncated){
+    const capIso = formatISO(maxDate);
+    const beyond = (arr) => arr.filter(x => x.date > capIso);
+    const beyondNew = [...beyond(vocabChunks), ...beyond(refChunks)];
+    const beyondReview = [...beyond(vocabReviews), ...beyond(refReviews)].filter(r => !r.done);
+    const nextBeyond = [...beyondNew, ...beyondReview].map(x => x.date).sort()[0];
+    const nextLabel = nextBeyond ? `（次は ${parseISO(nextBeyond).getMonth()+1}/${parseISO(nextBeyond).getDate()}）` : '';
+    hiddenNoticeHtml = buildBeyondNoticeHtml(
+      `表示は今日から${MAX_DAYS}日分（〜${maxDate.getMonth()+1}/${maxDate.getDate()}）までです。`,
+      beyondNew.length, beyondReview.length, nextLabel,
+      '予定は消えていません。日が進むと、その日が近づいた時点で自動的に表示されます。'
+    );
+  }
 
   const rows = [];
   let cursor = new Date(minDate);
@@ -998,6 +1018,7 @@ function renderMergedSchedule(containerId){
   const detailsWasOpen = document.getElementById(`schedule-details-${containerId}`)?.open;
 
   let html = reviewLegendHTML();
+  html += hiddenNoticeHtml; // 45日を超える予定がある場合のみ、表の上に注意書きを出す
   html += `<table>${tableHead}<tbody>`;
   visibleRows.forEach(row => { html += rowHtml(row); });
   html += `</tbody></table>`;
@@ -1011,10 +1032,22 @@ function renderMergedSchedule(containerId){
     hiddenRows.forEach(row => { html += rowHtml(row); });
     html += `</tbody></table></div></details>`;
   }
-  if(truncated){ html += `<div class="hint" style="margin-top:8px;">※表示は45日分までです。それ以降は範囲を追加していくと自動で延びます。</div>`; }
+  // （旧）下部の「範囲を追加していくと自動で延びます」は誤りだったため削除。上部の注意書きに統合。
   html += `<div class="hint" style="margin-top:8px;">※過去日のスケジュールは非表示です。未達成の新規項目は「今日」に繰り上げられ、それに伴う復習日も自動で再計算されます。4日目以降は「残りのスケジュール」を開いて確認できます。復習はチェックを入れるとクリア済みになります。</div>`;
   area.innerHTML = html;
   attachReviewCheckHandlers(area);
+}
+
+// 「表示期間より先にも予定がある」ことを知らせる注意書きHTMLを返す（単語スケジュール表・統合ビュー共通）。
+// 件数が0なら空文字を返す（＝先に予定がなければ何も表示しない）。
+function buildBeyondNoticeHtml(headText, newCount, reviewCount, nextLabel, tailText){
+  if(newCount + reviewCount === 0) return '';
+  const parts = [];
+  if(newCount > 0)    parts.push(`新規${newCount}件`);
+  if(reviewCount > 0) parts.push(`復習${reviewCount}件`);
+  return `<div class="schedule-beyond-notice" style="margin:8px 0;padding:7px 10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;font-size:.78rem;color:#9a3412;font-weight:600;">
+    ⚠️ ${headText}これより先にも ${parts.join('・')} の予定があります${nextLabel}。${tailText}
+  </div>`;
 }
 
 function refreshAllSchedules(){
@@ -1049,6 +1082,25 @@ function renderIntegratedSchedule() {
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+
+  // 表示期間（1週間=7日／1ヶ月=30日）より先にある予定の件数を通知する。
+  // これがないと「10日先の予定が無い」ように見えてしまうため。
+  {
+    const lastIso = formatISO(addDays(today, targetDays - 1));
+    const beyond = (arr) => arr.filter(x => x.date > lastIso);
+    const beyondNew = [...beyond(allWordChunks), ...beyond(allBookChunks)];
+    const beyondReview = [...beyond(allWordReviews), ...beyond(allBookReviews)].filter(r => !r.done);
+    if (beyondNew.length + beyondReview.length > 0) {
+      const next = [...beyondNew, ...beyondReview].map(x => x.date).sort()[0];
+      const nextLabel = `（次は ${parseISO(next).getMonth()+1}/${parseISO(next).getDate()}）`;
+      const periodLabel = periodMode === 'week' ? '今日から7日間' : '今日から30日間';
+      const tailText = periodMode === 'week'
+        ? '「1ヶ月」表示に切り替えるか、単語タブのスケジュール表（45日先まで）で確認できます。'
+        : '単語タブのスケジュール表（45日先まで）で確認できます。';
+      container.insertAdjacentHTML('beforeend',
+        buildBeyondNoticeHtml(`表示は${periodLabel}です。`, beyondNew.length, beyondReview.length, nextLabel, tailText));
+    }
+  }
 
   const futureDetails = document.createElement('details');
   futureDetails.className = 'schedule-details';
@@ -1175,7 +1227,7 @@ function renderIntegratedSchedule() {
     container.appendChild(futureDetails);
   }
 
-  if (!container.querySelector('div:not(.review-legend)')) {
+  if (!container.querySelector('div:not(.review-legend):not(.schedule-beyond-notice)')) {
     container.innerHTML += '<div style="text-align:center; color:#999; padding:20px;">この期間のスケジュールはありません。設定タブから登録してください。</div>';
   }
 
@@ -2250,7 +2302,17 @@ function buildAndValidateWordEntry(showError){
     showError('1日あたりの単語数を正しく入力してください。'); return null;
   }
 
-  return { newFields: { bookName, startNum, endNum, startDate, endDate, weekdays, intervals, planMode, amountPerDay } };
+  const newFields = { bookName, startNum, endNum, startDate, endDate, weekdays, intervals, planMode, amountPerDay };
+
+  // 事前にスケジュールを計算し、該当する学習日が1日もなければ登録前に知らせる（参考書側の登録と同じ検証）。
+  // 例：開始日〜終了日の間に、選んだ学習曜日が1日も含まれない場合。
+  // この検証がないと、登録一覧には出るのにスケジュールには1件も出ない状態になってしまう。
+  if (computeChunksForEntry(newFields).length === 0) {
+    showError('指定した期間・曜日では学習日がありません。開始日〜終了日の間に、選んだ学習曜日が含まれるよう設定を見直してください。');
+    return null;
+  }
+
+  return { newFields };
 }
 
 /**
