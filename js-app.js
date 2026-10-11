@@ -644,10 +644,26 @@ function computeAdjustedSchedule(materialType, material) {
   //   繰越タスクを完了した場合は latest.plannedEnd - latest.actualEnd = 0 になってしまい、
   //   今日の元スケジュール分がキャパとして計上されなかった。
   const todayOriginalChunks = originalChunks.filter(c => c.date === todayStr);
-  const todayCapacity = todayOriginalChunks.reduce((sum, c) => {
+  let todayCapacity = todayOriginalChunks.reduce((sum, c) => {
     const effectiveStart = Math.max(c.rangeStart, remainingStart);
     return sum + Math.max(0, c.rangeEnd - effectiveStart + 1);
   }, 0);
+
+  // ▼ FIX: 元計画に「今日」の枠が無い場合でも、今日が学習曜日なら今日の枠を確保する。
+  if (todayOriginalChunks.length === 0) {
+    const studyDays = (material.weekdays && material.weekdays.length > 0) ? material.weekdays : [0,1,2,3,4,5,6];
+    if (studyDays.includes(parseISO(todayStr).getDay())) {
+      const perDay = material.planMode === 'byAmount'
+        ? (material.amountPerDay || 1)
+        : (originalChunks.length > 0
+            ? Math.ceil((material.endNum - material.startNum + 1) / originalChunks.length)
+            : remaining);
+      const doneToday = pastChunks
+        .filter(c => c.date === todayStr)
+        .reduce((sum, c) => sum + Math.max(0, c.rangeEnd - c.rangeStart + 1), 0);
+      todayCapacity = Math.max(0, perDay - doneToday);
+    }
+  }
 
   const todayChunks = [];
   let futureStart = remainingStart;
