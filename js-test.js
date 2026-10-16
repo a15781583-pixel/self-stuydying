@@ -418,6 +418,7 @@ function shuffle(arr) {
 let testQueue = [];
 let currentTestIdx = 0;
 let testSessionResults = [];
+let testAnswering = false; // 回答処理中フラグ（連打で同じ単語が2回採点され、次の単語が飛ばされるのを防ぐ）
 
 document.getElementById('startTestBtn')?.addEventListener('click', () => {
   const mode = document.getElementById('testMode').value;
@@ -434,10 +435,14 @@ document.getElementById('startTestBtn')?.addEventListener('click', () => {
   } else if(mode === 'miss1') {
     testQueue = activeWords.filter(w => w.missCount === 1);
     if(testQueue.length === 0) { alert('現在、ミス1回の単語はありません。'); return; }
+  } else {
+    // 【修正】未知のモードのとき、前回の testQueue が残って意図しない出題になっていた
+    testQueue = [...activeWords];
   }
 
   currentTestIdx = 0;
   testSessionResults = [];
+  testAnswering = false;
   document.getElementById('testArea').style.display = 'block';
   document.getElementById('resultArea').style.display = 'none';
   document.getElementById('testModal').classList.add('active');
@@ -462,21 +467,27 @@ document.getElementById('testRevealBtn')?.addEventListener('click', () => {
   document.getElementById('testActions').classList.add('shown');
 });
 
-document.getElementById('testCorrectBtn')?.addEventListener('click', async () => {
+// 【修正】「できた」「もう一度」の共通処理。
+//   以前は保存（await）の最中に連打すると同じ単語が二重に採点（復習ステップが2段進む）され、
+//   currentTestIdx も2つ進んで次の単語が飛ばされていた。
+async function answerTestWord(correct) {
+  if (testAnswering) return;
   const wordData = testQueue[currentTestIdx];
-  testSessionResults.push({ word: wordData.word, correct: true });
-  await handleLeechCorrect(wordData.id);
-  currentTestIdx++;
-  showTestWord();
-});
+  if (!wordData) return;
+  testAnswering = true;
+  try {
+    testSessionResults.push({ word: wordData.word, correct });
+    if (correct) await handleLeechCorrect(wordData.id);
+    else await handleLeechWrong(wordData.id);
+    currentTestIdx++;
+    showTestWord();
+  } finally {
+    testAnswering = false;
+  }
+}
 
-document.getElementById('testWrongBtn')?.addEventListener('click', async () => {
-  const wordData = testQueue[currentTestIdx];
-  testSessionResults.push({ word: wordData.word, correct: false });
-  await handleLeechWrong(wordData.id);
-  currentTestIdx++;
-  showTestWord();
-});
+document.getElementById('testCorrectBtn')?.addEventListener('click', () => answerTestWord(true));
+document.getElementById('testWrongBtn')?.addEventListener('click', () => answerTestWord(false));
 
 function finishTest() {
   document.getElementById('testArea').style.display = 'none';
@@ -486,7 +497,7 @@ function finishTest() {
   document.getElementById('resultScore').textContent = `正答率: ${correctCount} / ${testQueue.length} (${rate}%)`;
   document.getElementById('resultList').innerHTML = testSessionResults.map(r => `
     <div class="result-item">
-      <span style="font-family:'IBM Plex Mono', monospace; font-weight:700;">${r.word}</span>
+      <span style="font-family:'IBM Plex Mono', monospace; font-weight:700;">${escapeHtml(r.word)}</span>
       <span style="color:${r.correct ? 'var(--success)' : 'var(--margin-red)'}; font-weight:700;">
         ${r.correct ? '〇 できた' : '✖ もう一度'}
       </span>
