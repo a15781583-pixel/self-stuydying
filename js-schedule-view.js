@@ -304,25 +304,6 @@ function renderIntegratedSchedule() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  // 表示期間（1週間=7日／1ヶ月=30日）より先にある予定の件数を通知する。
-  // これがないと「10日先の予定が無い」ように見えてしまうため。
-  {
-    const lastIso = formatISO(addDays(today, targetDays - 1));
-    const beyond = (arr) => arr.filter(x => x.date > lastIso);
-    const beyondNew = [...beyond(allWordChunks), ...beyond(allBookChunks)];
-    const beyondReview = [...beyond(allWordReviews), ...beyond(allBookReviews)].filter(r => !r.done);
-    if (beyondNew.length + beyondReview.length > 0) {
-      const next = [...beyondNew, ...beyondReview].map(x => x.date).sort()[0];
-      const nextLabel = `（次は ${parseISO(next).getMonth()+1}/${parseISO(next).getDate()}）`;
-      const periodLabel = periodMode === 'week' ? '今日から7日間' : '今日から30日間';
-      const tailText = periodMode === 'week'
-        ? '「1ヶ月」表示に切り替えるか、単語タブのスケジュール表（45日先まで）で確認できます。'
-        : '単語タブのスケジュール表（45日先まで）で確認できます。';
-      container.insertAdjacentHTML('beforeend',
-        buildBeyondNoticeHtml(`表示は${periodLabel}です。`, beyondNew.length, beyondReview.length, nextLabel, tailText));
-    }
-  }
-
   const futureDetails = document.createElement('details');
   futureDetails.className = 'schedule-details';
   futureDetails.id = 'integratedScheduleFuture';
