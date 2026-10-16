@@ -14,7 +14,8 @@
 ========================================================= */
 
 // ① 初期化（今日の日付をセットし、保存されたデータを読み込む）
-window.addEventListener('DOMContentLoaded', () => {
+// 【修正】onDomReady を使い、スクリプトが DOMContentLoaded 後に読み込まれても初期化が実行されるようにする
+onDomReady(() => {
   const refStartDateInput = document.getElementById('refStartDate');
   if(refStartDateInput) {
     refStartDateInput.value = todayISO();
@@ -33,6 +34,8 @@ window.addEventListener('DOMContentLoaded', () => {
       document.getElementById('refEndDateWrap').style.display = isByAmount ? 'none' : 'block';
     });
   });
+  // 【追加】初期表示でも、選択中の割り振り方法に合わせて入力欄の表示を揃える
+  document.querySelector('input[name="refPlanMode"]:checked')?.dispatchEvent(new Event('change'));
 
   // loadRefEntries() / renderIntegratedSchedule() / renderRefTodayCard() は
   // init() → loadRefEntries() → renderRefSchedule() → renderRefTodayCard() の
@@ -99,7 +102,7 @@ function buildAndValidateRefEntry(showError){
   const weekdays = getCheckedValues('refWeekdayRow');
   const intervals = getCheckedValues('refIntervalRow');
 
-  if (!bookName || isNaN(startNum) || isNaN(endNum) || !startDate) {
+  if (!bookName || isNaN(startNum) || isNaN(endNum) || startNum < 0 || endNum < 0 || !startDate) {
     showError('すべての項目を正しく入力してください。');
     return null;
   }
