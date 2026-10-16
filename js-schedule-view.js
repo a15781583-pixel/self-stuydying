@@ -504,7 +504,14 @@ const COMPLETION_DISMISSED_KEY = 'vocab-completion-dismissed'; // 「閉じる�
 // 集計の対象は「期限日が今週（月曜〜今日）のタスク」。
 //  ・新規タスク … 計画上の学習日（スロット）。進捗レコードがあればその最新状態、無ければ未完了。
 //  ・復習タスク … 本来の復習予定日（originalDate）。完了チェック／進捗レコードで判定。
-// 明日以降に期限が来るタスクは集計に含めず、件数だけ注記する。
+// 明日以降に期限が来るタスクは集計に含めない。
+// 画面には「件数」は出さず、完了・途中・未完了の「割合（％）」だけを表示する。
+//
+// ★ 今日が期限で、まだ記録していないタスクの扱い（WEEKLY_COUNT_TODAY_UNRECORDED）
+//    false … 「今日の未記録分」は保留とし、集計に含めない（記録した分だけが入る）。
+//            ％だけの表示では、朝の時点で「未完了100％」と出てしまうのを防ぐため。
+//    true  … 以前の動き。今日の未記録分も「未完了」として数える。
+const WEEKLY_COUNT_TODAY_UNRECORDED = false;
 const WEEKLY_STATUS_META = [
   { key: 'done',    label: '完了' },
   { key: 'partial', label: '途中' },
@@ -553,7 +560,8 @@ function getProgressSlotDate(p) {
 // 新規タスク（単語 or 参考書）の今週分の状態を集計する
 function collectNewTaskStatuses(materials, type, computeBase, range) {
   const statuses = [];
-  let upcoming = 0;
+  let upcoming = 0;      // 明日以降に期限が来るもの
+  let pendingToday = 0;  // 今日が期限で、まだ記録していないもの（保留）
 
   materials.forEach(m => {
     const owned = dailyProgress.filter(p => p.type === type && getProgressOwnerId(p) === m.id);
@@ -572,19 +580,23 @@ function collectNewTaskStatuses(materials, type, computeBase, range) {
     });
     bySlot.forEach(list => statuses.push(classifyProgressRecord(pickLatestProgress(list))));
 
-    // (2) 記録が無い学習予定日：今日まで→未完了、明日以降→「今後の予定」
+    // (2) 記録が無い学習予定日：昨日まで→未完了、今日→保留（設定で未完了にも切替可）、明日以降→「今後の予定」
     const recordedSlots = new Set(owned.map(getProgressSlotDate));
     computeBase(m).forEach(c => {
       if (c.date < range.startIso || c.date > range.endIso) return;
       if (completedOn && c.date > completedOn) return;
       if (recordedSlots.has(c.date)) return;
-      if (c.date <= range.todayIso) statuses.push('none'); else upcoming++;
+      if (c.date < range.todayIso) statuses.push('none');
+      else if (c.date === range.todayIso) {
+        if (WEEKLY_COUNT_TODAY_UNRECORDED) statuses.push('none'); else pendingToday++;
+      } else upcoming++;
     });
   });
-  return { statuses, upcoming };
+  return { statuses, upcoming, pendingToday };
 }
 
-// 復習タスク1件の状態（完了チェック済み／途中まで進捗入力済み／未着手）
+// 復習タスク1件の状態（完了チェック済み／途中まで進捗入力済み／記録なし／進んでいない）
+//  'done' / 'partial' / 'none'（記録済みだが進んでいない） / 'unrecorded'（まだ何も記録していない）
 function classifyReviewStatus(r) {
   if (r.done) return 'done';
   const baseKey = r.key.replace(MOVED_KEY_SUFFIX_RE, '');
@@ -592,19 +604,24 @@ function classifyReviewStatus(r) {
     (p.type === 'word-review' || p.type === 'book-review') && p.reviewKey &&
     p.reviewKey.replace(MOVED_KEY_SUFFIX_RE, '') === baseKey
   );
-  if (!recs.length) return 'none';
+  if (!recs.length) return 'unrecorded';
   return classifyProgressRecord(pickLatestProgress(recs)) === 'partial' ? 'partial' : 'none';
 }
 
 function collectReviewStatuses(reviews, range) {
   const statuses = [];
-  let upcoming = 0;
+  let upcoming = 0;      // 明日以降に期限が来るもの
+  let pendingToday = 0;  // 今日が期限で、まだ記録していないもの（保留）
   reviews.forEach(r => {
     if (r.originalDate < range.startIso || r.originalDate > range.endIso) return;
     if (r.originalDate > range.todayIso) { if (!r.done) upcoming++; return; }
-    statuses.push(classifyReviewStatus(r));
+    const st = classifyReviewStatus(r);
+    if (st !== 'unrecorded') { statuses.push(st); return; }
+    // 記録なし：昨日までに期限が来ていれば未完了。今日が期限なら保留（設定で未完了にも切替可）
+    if (r.originalDate === range.todayIso && !WEEKLY_COUNT_TODAY_UNRECORDED) pendingToday++;
+    else statuses.push('none');
   });
-  return { statuses, upcoming };
+  return { statuses, upcoming, pendingToday };
 }
 
 function tallyStatuses(statuses) {
@@ -650,13 +667,16 @@ function computeWeeklySummary(scheduleData) {
     newTasks: tallyStatuses(newStatuses),
     reviews: tallyStatuses(reviewStatuses),
     upcoming: wordNew.upcoming + bookNew.upcoming + wordRev.upcoming + bookRev.upcoming,
+    pendingToday: wordNew.pendingToday + bookNew.pendingToday + wordRev.pendingToday + bookRev.pendingToday,
     hasMaterials: entries.length + refEntries.length > 0,
   };
 }
 
+// 新規／復習ごとの内訳（％のみ。件数は表示しない）
 function buildWeeklyBreakdownText(label, c) {
-  if (!c.total) return `${label} 0件`;
-  return `${label} ${c.total}件（完了${c.done}・途中${c.partial}・未完了${c.none}）`;
+  if (!c.total) return `${label}：―`;
+  const p = toPercents(c);
+  return `${label}：完了${p.done}%・途中${p.partial}%・未完了${p.none}%`;
 }
 
 function renderWeeklySummary(scheduleData) {
@@ -669,7 +689,9 @@ function renderWeeklySummary(scheduleData) {
   if (!s.hasMaterials) {
     bodyHtml = `<div class="ws-empty">スケジュールを登録すると、今週の達成状況がここに表示されます。</div>`;
   } else if (s.total.total === 0) {
-    bodyHtml = `<div class="ws-empty">今週は、集計できるタスクがまだありません。</div>`;
+    bodyHtml = s.pendingToday > 0
+      ? `<div class="ws-empty">まだ集計できるタスクがありません。今日の分を記録すると、ここに反映されます。</div>`
+      : `<div class="ws-empty">今週は、集計できるタスクがまだありません。</div>`;
   } else {
     const pct = toPercents(s.total);
     const barLabel = WEEKLY_STATUS_META.map(m => `${m.label}${pct[m.key]}%`).join('、');
@@ -680,16 +702,17 @@ function renderWeeklySummary(scheduleData) {
     const tiles = WEEKLY_STATUS_META.map(m => `
       <div class="ws-stat ws-stat-${m.key}">
         <div class="ws-stat-label"><span class="ws-dot ws-dot-${m.key}"></span>${m.label}</div>
-        <div class="ws-stat-num">${s.total[m.key]}<span class="ws-stat-unit">件</span></div>
-        <div class="ws-stat-pct">${pct[m.key]}%</div>
+        <div class="ws-stat-num">${pct[m.key]}<span class="ws-stat-unit">%</span></div>
       </div>`).join('');
-    const upcomingNote = s.upcoming > 0 ? `明日以降の予定 ${s.upcoming}件 は含まれていません。` : '';
+    const pendingNote = (!WEEKLY_COUNT_TODAY_UNRECORDED && s.pendingToday > 0)
+      ? '今日の未記録分は、記録するまで集計に含めていません。' : '';
+    const upcomingNote = s.upcoming > 0 ? '明日以降の予定は含まれていません。' : '';
     bodyHtml = `
-      <div class="ws-total">今日までに期限が来たタスク <strong>${s.total.total}</strong> 件</div>
+      <div class="ws-total">今日までに期限が来たタスクの達成状況（新規＋復習）</div>
       <div class="ws-bar" role="img" aria-label="${barLabel}">${segs}</div>
       <div class="ws-stats">${tiles}</div>
       <div class="ws-breakdown">${buildWeeklyBreakdownText('新規', s.newTasks)}　／　${buildWeeklyBreakdownText('復習', s.reviews)}</div>
-      <div class="ws-note">※ 期限日が今週（月曜〜今日）のタスクを集計しています。${upcomingNote}</div>`;
+      <div class="ws-note">※ 期限日が今週（月曜〜今日）のタスクを集計しています。${pendingNote}${upcomingNote}</div>`;
   }
 
   el.innerHTML = `
