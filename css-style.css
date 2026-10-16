@@ -420,6 +420,174 @@
     margin-top: 10px;
   }
 
+  /* ---------- 今週のまとめカード ---------- */
+  /* 月目標カード（.month-goal-card）と同じ形式：濃紺の背景＋左上ラベル＋右上ピル＋表示エリア */
+  .weekly-summary-card {
+    background: var(--ink);
+    color: var(--white);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+    margin-bottom: 18px;
+  }
+  .weekly-summary-card .ws-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .weekly-summary-card .ws-title {      /* = .mg-label と同じ */
+    font-size: .8rem;
+    opacity: .75;
+    font-weight: 600;
+    letter-spacing: .02em;
+  }
+  .weekly-summary-card .ws-range {      /* = .mg-edit-btn と同じ見た目（押せない表示用） */
+    background: rgba(255,255,255,.08);
+    color: var(--white);
+    border: 1px solid rgba(255,255,255,.3);
+    padding: 4px 12px;
+    font-size: .75rem;
+    font-weight: 600;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .weekly-summary-card .ws-display {    /* = .mg-display と同じ */
+    font-size: 1rem;
+    line-height: 1.6;
+  }
+  .weekly-summary-card .ws-total {
+    font-size: .85rem;
+    color: rgba(255,255,255,.85);
+    margin-bottom: 8px;
+  }
+  .weekly-summary-card .ws-total strong {
+    color: var(--white);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 1.1rem;
+  }
+  .weekly-summary-card .ws-bar {
+    display: flex;
+    height: 12px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: rgba(255,255,255,.18);
+    margin-bottom: 12px;
+  }
+  .weekly-summary-card .ws-seg { display: block; height: 100%; }
+  .weekly-summary-card .ws-seg-done    { background: var(--success); }
+  .weekly-summary-card .ws-seg-partial { background: var(--gold); }
+  .weekly-summary-card .ws-seg-none    { background: var(--margin-red); }
+  .weekly-summary-card .ws-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  .weekly-summary-card .ws-stat {
+    border-radius: 8px;
+    padding: 10px 6px;
+    text-align: center;
+    color: var(--ink);   /* 濃紺カード上の明るいタイルなので文字は濃紺に戻す */
+    border: 1px solid var(--paper-line);
+  }
+  .weekly-summary-card .ws-stat-done    { background: var(--success-bg); border-color: #b9d3c2; }
+  .weekly-summary-card .ws-stat-partial { background: var(--gold-bg);    border-color: #e4cd94; }
+  .weekly-summary-card .ws-stat-none    { background: #fdecea;           border-color: var(--margin-red-soft); }
+  .weekly-summary-card .ws-stat-label {
+    font-size: .78rem;
+    font-weight: 700;
+    color: var(--ink);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+  }
+  .weekly-summary-card .ws-dot {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+  }
+  .weekly-summary-card .ws-dot-done    { background: var(--success); }
+  .weekly-summary-card .ws-dot-partial { background: var(--gold); }
+  .weekly-summary-card .ws-dot-none    { background: var(--margin-red); }
+  .weekly-summary-card .ws-stat-num {
+    font-family: 'IBM Plex Mono', monospace;
+    font-weight: 600;
+    font-size: 1.5rem;
+    line-height: 1.3;
+    margin-top: 2px;
+  }
+  .weekly-summary-card .ws-stat-unit {
+    font-family: 'Noto Sans JP', sans-serif;
+    font-size: .72rem;
+    font-weight: 500;
+    margin-left: 2px;
+    color: var(--ink-soft);
+  }
+  .weekly-summary-card .ws-stat-pct {
+    font-size: .85rem;
+    font-weight: 700;
+    color: var(--ink-soft);
+  }
+  .weekly-summary-card .ws-breakdown {
+    margin-top: 10px;
+    font-size: .78rem;
+    color: rgba(255,255,255,.75);
+    line-height: 1.7;
+  }
+  .weekly-summary-card .ws-note {
+    margin-top: 6px;
+    font-size: .74rem;
+    color: rgba(255,255,255,.65);
+    line-height: 1.6;
+  }
+  .weekly-summary-card .ws-empty {
+    font-size: .88rem;
+    color: rgba(255,255,255,.8);
+    padding: 6px 0;
+  }
+
+  /* ---------- 完了後の「次のタスク設定」案内 ---------- */
+  .completion-prompt {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    background: var(--success-bg);
+    border: 1px solid #b9d3c2;
+    border-left: 5px solid var(--success);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    margin-bottom: 14px;
+  }
+  .completion-prompt .cp-icon { font-size: 1.6rem; line-height: 1.2; }
+  .completion-prompt .cp-body { flex: 1; min-width: 0; }
+  .completion-prompt .cp-title {
+    font-weight: 700;
+    color: var(--success);
+    line-height: 1.5;
+    word-break: break-word;
+  }
+  .completion-prompt .cp-text {
+    margin-top: 4px;
+    font-size: .88rem;
+    color: var(--ink);
+    line-height: 1.6;
+  }
+  .completion-prompt .cp-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+  }
+  .completion-prompt .cp-actions button { font-size: .85rem; padding: 8px 14px; }
+
+  @media (max-width: 640px) {
+    .weekly-summary-card { padding: 14px 12px; }
+    .weekly-summary-card .ws-stat-num { font-size: 1.3rem; }
+    .completion-prompt { padding: 12px; gap: 10px; }
+    .completion-prompt .cp-actions button { min-height: 44px; flex: 1; }
+  }
+
   /* [ai-features.html] セキュリティバナースタイル → ai-features.html に移動 */
 
   /* ---------- setup (teacher) area ---------- */
