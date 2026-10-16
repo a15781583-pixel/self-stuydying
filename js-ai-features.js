@@ -43,6 +43,16 @@ function initAiFeatures() {
   loadSavedApiKey();
   setupApiKeyPersistence();
 
+  // APIキー「保存」ボタン（従来はハンドラ未登録だった）
+  const apiKeySaveBtn = document.getElementById('apiKeySaveBtn');
+  if (apiKeySaveBtn) apiKeySaveBtn.addEventListener('click', async () => {
+    const keyEl = document.getElementById('geminiApiKey');
+    const v = keyEl ? keyEl.value.trim() : '';
+    await saveApiKey(v);
+    const st = document.getElementById('apiKeyStatus');
+    if (st) st.textContent = v ? '✅ 保存しました' : 'キーを削除しました';
+  });
+
   const chatSendBtn = document.getElementById('chatSendBtn');
   const chatInput = document.getElementById('chatInput');
   const chatStopBtn = document.getElementById('chatStopBtn');
@@ -85,8 +95,10 @@ function initAiFeatures() {
       if (file) {
         const reader = new FileReader();
         reader.onload = (e) => {
-          document.getElementById('imagePreview').src = e.target.result;
-          document.getElementById('imagePreviewContainer').style.display = 'block';
+          const pv = document.getElementById('imagePreview');
+          const pc = document.getElementById('imagePreviewContainer');
+          if (pv) pv.src = e.target.result;
+          if (pc) pc.style.display = 'block';
         };
         reader.readAsDataURL(file);
       }
@@ -95,8 +107,10 @@ function initAiFeatures() {
   if (clearImgBtn) {
     clearImgBtn.addEventListener('click', () => {
       if (fileInput) fileInput.value = '';
-      document.getElementById('imagePreviewContainer').style.display = 'none';
-      document.getElementById('imagePreview').src = '';
+      const pc = document.getElementById('imagePreviewContainer');
+      const pv = document.getElementById('imagePreview');
+      if (pc) pc.style.display = 'none';
+      if (pv) pv.src = '';
     });
   }
 }
@@ -187,7 +201,8 @@ function appendMessage(text, isUser, imgSrc = null) {
 }
 
 async function handleChatSend() {
-  const apiKey = document.getElementById('geminiApiKey').value.trim();
+  const apiKeyEl = document.getElementById('geminiApiKey');
+  const apiKey = apiKeyEl ? apiKeyEl.value.trim() : '';
   const errorEl = document.getElementById('coachErrorMsg');
   if(!apiKey) { if(errorEl) errorEl.textContent = 'APIキーを入力してください。'; return; }
   if(errorEl) errorEl.textContent = '';
@@ -207,20 +222,23 @@ async function handleChatSend() {
   document.getElementById('chatSendBtn').style.display = 'none';
   document.getElementById('chatStopBtn').style.display = 'inline-block';
 
-  appendMessage(text, true, file ? document.getElementById('imagePreview').src : null);
+  appendMessage(text, true, file ? document.getElementById('imagePreview')?.src : null);
   chatHistory.push({ role: 'user', parts: parts });
 
   chatInput.value = '';
   if (fileInput) fileInput.value = '';
-  document.getElementById('imagePreviewContainer').style.display = 'none';
+  const previewContainer = document.getElementById('imagePreviewContainer');
+  if (previewContainer) previewContainer.style.display = 'none';
   chatInput.disabled = true;
 
   const chatBox = document.getElementById('chatBox');
   const loadingIndicator = document.createElement('div');
   loadingIndicator.className = 'typing-indicator chat-msg';
   loadingIndicator.innerHTML = '<span></span><span></span><span></span>';
-  chatBox.appendChild(loadingIndicator);
-  chatBox.scrollTop = chatBox.scrollHeight;
+  if (chatBox) {
+    chatBox.appendChild(loadingIndicator);
+    chatBox.scrollTop = chatBox.scrollHeight;
+  }
 
   try {
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`, {
@@ -245,6 +263,8 @@ async function handleChatSend() {
     chatHistory.push({ role: 'model', parts: [{ text: aiResponseText }] });
   } catch (error) {
     loadingIndicator.remove();
+    // 応答が得られなかった場合、末尾のuser発言を履歴から除去
+    if (chatHistory.length && chatHistory[chatHistory.length - 1].role === 'user') chatHistory.pop();
     if (error.name !== 'AbortError') {
       if(errorEl) errorEl.textContent = '通信エラー: ' + error.message;
     }
@@ -262,7 +282,8 @@ async function handleChatSend() {
 }
 
 async function generateFinalPlan() {
-  const apiKey = document.getElementById('geminiApiKey').value.trim();
+  const apiKeyEl = document.getElementById('geminiApiKey');
+  const apiKey = apiKeyEl ? apiKeyEl.value.trim() : '';
   if(!apiKey || chatHistory.length === 0) return;
 
   document.getElementById('coachChatSection').style.display = 'none';
@@ -302,7 +323,8 @@ function continueChat() {
 function resetChat() {
   if (confirm('チャットを最初からやり直しますか？')) {
     chatHistory.length = 0;
-    document.getElementById('chatBox').innerHTML = '<div class="chat-msg model-msg">こんにちは！目標を教えてください！</div>';
+    const box = document.getElementById('chatBox');
+    if (box) box.innerHTML = '<div class="chat-msg model-msg">こんにちは！目標を教えてください！</div>';
     continueChat();
   }
 }
