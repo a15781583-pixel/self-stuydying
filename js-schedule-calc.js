@@ -126,6 +126,8 @@ function buildProgressReviews(progressItems, prefix, getResolved, getEntity, get
     .map(p => {
       const resolved = getResolved(p);
       const entity = getEntity(resolved);
+      // 【修正】到達番号が開始番号に満たない（＝1件も進んでいない）記録は、復習する範囲が存在しないため除外
+      if (!(p.actualEnd >= p.plannedStart)) return null;
       return entity ? { p, resolved, entity } : null;
     })
     .filter(Boolean);
@@ -462,7 +464,8 @@ function buildLeftoverChunks(material, progressRecords, originalChunks, idFields
   const gaps = [];
   let cur = material.startNum;
   merged.forEach(([s, e]) => {
-    if (s > cur) gaps.push([cur, Math.min(s - 1, upTo)]);
+    // 【修正】cur が upTo を超えている場合に、逆転した範囲（開始>終了）の穴が作られないようにする
+    if (s > cur && cur <= upTo) gaps.push([cur, Math.min(s - 1, upTo)]);
     cur = Math.max(cur, e + 1);
   });
   if (cur <= upTo) gaps.push([cur, upTo]);
@@ -621,9 +624,11 @@ function computeAdjustedSchedule(materialType, material) {
 
   // [Step 3] 将来チャンクがない場合：新規タスクを生成して配分
   if (futureChunks.length === 0 || material.planMode === 'byAmount') {
+    // 【修正】amountPerDay が未設定・NaN の場合、Math.max(1, NaN) が NaN になり
+    //   チャンクの範囲が NaN になって以降の割り振りが止まっていた。数値でなければ 1 とみなす。
     const amountPerDay = Math.max(1,
       material.planMode === 'byAmount'
-        ? material.amountPerDay
+        ? (Number(material.amountPerDay) || 1)
         : originalChunks.length > 0
           ? Math.ceil((material.endNum - material.startNum + 1) / originalChunks.length)
           : futureRemaining
@@ -705,11 +710,14 @@ function computeScheduleChunks(plan, extraFields = {}) {
   const start = parseISO(plan.startDate);
   const chunks = [];
   if (plan.planMode === 'byAmount') {
+    // 【修正】amountPerDay が 0・負数・小数・未設定だと、範囲が進まないまま空のチャンクを
+    //   大量に作ったり、小数の範囲になったりする。1以上の整数に正規化する。
+    const perDay = Math.max(1, Math.floor(Number(plan.amountPerDay)) || 1);
     let cursor = plan.startNum, daysAdded = 0;
     while (cursor <= plan.endNum && daysAdded <= 3650) {
       const d = addDays(start, daysAdded++);
       if (!(plan.weekdays || []).includes(d.getDay())) continue;
-      const count = Math.min(plan.amountPerDay, plan.endNum - cursor + 1);
+      const count = Math.min(perDay, plan.endNum - cursor + 1);
       chunks.push({ date: formatISO(d), rangeStart: cursor, rangeEnd: cursor + count - 1, ...extraFields });
       cursor += count;
     }
@@ -718,7 +726,10 @@ function computeScheduleChunks(plan, extraFields = {}) {
     const end = plan.endDate ? parseISO(plan.endDate) : addDays(start, 6);
     const studyDates = [];
     let cur = new Date(start);
-    while (cur <= end && studyDates.length <= 3650) {
+    // 【修正】学習曜日が1つも無い古いデータ＋遠い終了日の組み合わせで、
+    //   studyDates が増えないまま延々と日付を進める（画面フリーズ）ことを防ぐ上限
+    let dayGuard = 0;
+    while (cur <= end && studyDates.length <= 3650 && dayGuard++ < 40000) {
       if ((plan.weekdays || []).includes(cur.getDay())) studyDates.push(new Date(cur));
       cur = addDays(cur, 1);
     }
