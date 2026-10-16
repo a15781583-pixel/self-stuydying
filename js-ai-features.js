@@ -83,11 +83,12 @@ function initAiFeatures() {
   }
   if (runAnalysisBtn) runAnalysisBtn.addEventListener('click', runWeaknessAnalysis);
 
-  const scoreAddBtn = document.getElementById('scoreAddBtn');
-  if (scoreAddBtn) scoreAddBtn.addEventListener('click', addScoreRecord);
+  // scoreAddBtn（成績追加）は js-main.js が handleScoreAdd（js-test.js）を登録済みのため、ここでは登録しない。
+  // （旧名 addScoreRecord はどのファイルにも存在せず、二重登録にもなるため削除）
 
   const applyPlanBtn = document.getElementById('applyPlanBtn');
-  if (applyPlanBtn) applyPlanBtn.addEventListener('click', applyPlanToSchedule);
+  // applyPlanToSchedule はどのJSファイルにも未実装のため、定義されている場合のみ登録する
+  if (applyPlanBtn && typeof applyPlanToSchedule === 'function') applyPlanBtn.addEventListener('click', applyPlanToSchedule);
 
   if (fileInput) {
     fileInput.addEventListener('change', () => {
@@ -241,7 +242,7 @@ async function handleChatSend() {
   }
 
   try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`, {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -291,7 +292,7 @@ async function generateFinalPlan() {
   document.getElementById('coachLoading').style.display = 'block';
 
   try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`, {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -373,7 +374,7 @@ async function handleScoreImageFile(event) {
 例: {"date":"2025-06-01","subject":"英語","category":"","examType":"全統模試","score":85,"total":100,"deviation":62.5,"note":""}`;
 
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -447,7 +448,7 @@ async function runWeaknessAnalysis() {
   }
 
   try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`, {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ contents: [{ role: 'user', parts }] })
@@ -488,7 +489,11 @@ function renderAnalysisResult(result) {
 
 /* --- js-ai-features.js が defer で読み込まれる際、DOMContentLoadedは既に発火済みのため直接初期化 --- */
 // (両スクリプトともdeferのため js-app.js → js-ai-features.js の順で実行される)
-initAiFeatures();
+try {
+  initAiFeatures();
+} catch (e) {
+  console.error('[ai-features] initAiFeatures に失敗:', e);
+}
 
 // js-app.jsのinit()が先に実行されrenderAnalysisResultが未定義だった場合のリカバリ
 try {
