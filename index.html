@@ -298,7 +298,7 @@
             GoogleのGemini APIキーを入力してください。<a href="https://ai.google.dev/tutorials/setup" target="_blank" style="color:var(--accent);">キー取得はこちら</a>
           </p>
           <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
-            <input type="password" id="apiKeyInput" placeholder="Gemini API Key" style="flex:1; min-width:250px; padding:8px; border:1px solid var(--paper-line); border-radius:6px; font-family:monospace;">
+            <input type="password" id="geminiApiKey" placeholder="Gemini API Key" style="flex:1; min-width:250px; padding:8px; border:1px solid var(--paper-line); border-radius:6px; font-family:monospace;">
             <button id="apiKeySaveBtn" class="btn-primary">保存</button>
           </div>
           <div id="apiKeyStatus" style="font-size:.85rem; color:var(--ink-soft);"></div>
@@ -314,8 +314,15 @@
           </p>
         </div>
 
-        <div class="chat-area" id="coachChatArea"
+        <div class="chat-area" id="chatBox"
              style="border:1px solid var(--paper-line); border-radius:8px; padding:12px; height:300px; overflow-y:auto; background:var(--paper); margin-bottom:12px; font-size:.85rem;">
+        </div>
+
+        <!-- 添付画像プレビュー（js-ai-features.js が参照） -->
+        <div id="imagePreviewContainer" style="display:none; margin-bottom:8px;">
+          <img id="imagePreview" src="" alt="添付プレビュー"
+               style="max-height:100px; border-radius:8px; display:block; margin-bottom:4px;">
+          <button type="button" id="clearImageBtn" class="btn-ghost">✖ 画像を外す</button>
         </div>
 
         <div style="display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;">
@@ -326,6 +333,8 @@
           <button id="chatSendBtn" class="btn-primary">送信</button>
           <button id="chatStopBtn" class="btn-ghost" style="display:none;">⏹ 停止</button>
         </div>
+
+        <div class="error-msg" id="coachErrorMsg"></div>
 
         <button id="generatePlanBtn" class="btn-primary"
                 style="width:100%; margin-top:14px;">
