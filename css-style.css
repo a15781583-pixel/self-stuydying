@@ -1437,3 +1437,61 @@
   #coachChatSection .btn-ghost{ font-size:.78rem; }
   #coachChatSection .btn-primary{ padding:7px 14px; }
   #coachChatSection .error-msg{ font-size:.75rem; }
+
+  /* ════════════════════════════════════════════════
+     スケジュール入力画面：曜日・復習タイミングのボタン（chip）を小型化
+     モバイルでも折り返さず横一列に並べる（このブロックは必ずファイル末尾に置く）
+  ════════════════════════════════════════════════ */
+  #weekdayRow .chip,
+  #intervalRow .chip,
+  #refWeekdayRow .chip,
+  #refIntervalRow .chip {
+    padding: 5px 10px;
+    font-size: .82rem;
+  }
+
+  @media (max-width: 640px) {
+    #weekdayRow,
+    #intervalRow,
+    #refWeekdayRow,
+    #refIntervalRow {
+      flex-wrap: nowrap;      /* 折り返さず横一列 */
+      gap: 4px;
+    }
+
+    #weekdayRow .chip,
+    #intervalRow .chip,
+    #refWeekdayRow .chip,
+    #refIntervalRow .chip {
+      flex: 1 1 0;            /* 幅を均等に分け合う */
+      min-width: 0;
+      min-height: 36px;       /* 44px → 36px に縮小 */
+      justify-content: center;
+      gap: 0;
+      padding: 4px 2px;
+      font-size: .78rem;
+      white-space: nowrap;
+    }
+
+    /* 復習タイミングは文字数が多いので、内容幅ベースで均等に近づける */
+    #intervalRow .chip,
+    #refIntervalRow .chip {
+      flex: 1 1 auto;
+    }
+
+    /* チェックボックスは見た目だけ非表示（選択状態は chip.checked の塗りで判別できる）。
+       label 経由のタップ・キーボード操作・スクリーンリーダーはそのまま動作 */
+    #weekdayRow .chip input,
+    #intervalRow .chip input,
+    #refWeekdayRow .chip input,
+    #refIntervalRow .chip input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      margin: 0;
+      pointer-events: none;
+    }
+
+    .chip { position: relative; }
+  }
