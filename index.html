@@ -301,32 +301,30 @@
       <h2>🤖 AI学習プランナー</h2>
 
       <!-- APIキー入力（両AIタブで共通使用） -->
-      <details class="setup-details" id="apiKeyDetails" open>
+      <details class="setup-details api-compact" id="apiKeyDetails" open>
         <summary>🔑 APIキーを設定</summary>
-        <div style="margin-top: 12px;">
-          <p style="font-size:.85rem; color:var(--ink-soft); margin-bottom:10px;">
-            GoogleのGemini APIキーを入力してください。<a href="https://aistudio.google.com/app/api-keys" target="_blank" style="color:var(--accent);">キー取得はこちら</a>
+        <div class="api-compact-body">
+          <p class="api-compact-hint">
+            GoogleのGemini APIキーを入力してください。<a href="https://aistudio.google.com/app/api-keys" target="_blank">キー取得はこちら</a>
           </p>
-          <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
-            <input type="password" id="geminiApiKey" placeholder="Gemini API Key" style="flex:1; min-width:250px; padding:8px; border:1px solid var(--paper-line); border-radius:6px; font-family:monospace;">
+          <div class="api-compact-row">
+            <input type="password" id="geminiApiKey" placeholder="Gemini API Key">
             <button id="apiKeySaveBtn" class="btn-primary">保存</button>
           </div>
-          <div id="apiKeyStatus" style="font-size:.85rem; color:var(--ink-soft);"></div>
+          <div id="apiKeyStatus" class="api-compact-status"></div>
         </div>
       </details>
 
       <!-- チャット領域 -->
       <div id="coachChatSection">
-        <div class="field full" style="margin-top:16px; margin-bottom:10px;">
+        <div class="field full coach-intro">
           <h3 class="sub-head">学習プラン相談</h3>
-          <p style="font-size:.9rem; color:var(--ink-soft); line-height:1.6;">
+          <p>
             学習目標、現状、困っていることなどを入力してください。AIが最適な学習ロードマップを提案します。
           </p>
         </div>
 
-        <div class="chat-area" id="chatBox"
-             style="border:1px solid var(--paper-line); border-radius:8px; padding:12px; height:300px; overflow-y:auto; background:var(--paper); margin-bottom:12px; font-size:.85rem;">
-        </div>
+        <div class="chat-area" id="chatBox"></div>
 
         <!-- 添付画像プレビュー（js-ai-features.js が参照） -->
         <div id="imagePreviewContainer" style="display:none; margin-bottom:8px;">
