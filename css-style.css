@@ -1383,3 +1383,57 @@
     .prog-partial-panel { padding: 10px 10px; }
     .prog-display-input { width: 64px; font-size: .98rem; }
   }
+
+
+  /* ---------- AI学習相談タブ：コンパクト表示（APIキー欄を小さく／チャット欄を広く／文字を小さく） ---------- */
+  /* ※チャット吹き出し(.chat-msg)の既定スタイルは css-ai-features.css 側にあるため、
+     ID付きセレクタで確実に上書きしている。 */
+  details.setup-details.api-compact{
+    padding:8px 12px; margin-bottom:10px; border-radius:8px;
+  }
+  details.setup-details.api-compact > summary{
+    font-size:.8rem;
+  }
+  .api-compact .api-compact-body{ margin-top:6px; }
+  .api-compact .api-compact-hint{
+    font-size:.72rem; color:var(--ink-soft); margin:0 0 6px 0; line-height:1.4;
+  }
+  .api-compact .api-compact-hint a{ color:var(--accent); }
+  .api-compact .api-compact-row{
+    display:flex; gap:6px; flex-wrap:wrap; align-items:center;
+  }
+  .api-compact .api-compact-row input{
+    flex:1; min-width:160px; padding:5px 8px; font-size:.78rem;
+    border:1px solid var(--paper-line); border-radius:6px; font-family:monospace;
+  }
+  .api-compact .api-compact-row .btn-primary{
+    font-size:.78rem; padding:5px 12px;
+  }
+  .api-compact .api-compact-status{
+    font-size:.72rem; color:var(--ink-soft); margin-top:4px; min-height:0;
+  }
+  .api-compact .api-compact-status:empty{ display:none; }
+
+  #coachChatSection .coach-intro{ margin-top:8px; margin-bottom:6px; }
+  #coachChatSection .coach-intro h3.sub-head{ font-size:.82rem; margin:0 0 2px 0; }
+  #coachChatSection .coach-intro p{
+    font-size:.74rem; color:var(--ink-soft); line-height:1.5; margin:0;
+  }
+
+  #chatBox{
+    border:1px solid var(--paper-line); border-radius:8px; padding:8px 10px;
+    height:clamp(340px, 62vh, 720px);
+    overflow-y:auto; background:var(--paper); margin-bottom:8px;
+    font-size:.78rem; line-height:1.5;
+  }
+  @supports (height:1dvh){
+    #chatBox{ height:clamp(340px, 62dvh, 720px); }
+  }
+  #chatBox .chat-msg{ font-size:.78rem; line-height:1.5; }
+  #chatBox .chat-msg *{ font-size:inherit; }
+
+  #coachChatSection #chatInput{ font-size:.8rem; padding:6px 8px; }
+  #coachChatSection .btn-primary,
+  #coachChatSection .btn-ghost{ font-size:.78rem; }
+  #coachChatSection .btn-primary{ padding:7px 14px; }
+  #coachChatSection .error-msg{ font-size:.75rem; }
