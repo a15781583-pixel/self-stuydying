@@ -43,6 +43,8 @@ function renderEntryList(){
     },
     onEdit: (id) => startEditEntry(id),
     onDelete: async (id) => {
+      // 【修正】参考書側と同様に、誤クリックでスケジュールが消えないよう確認する
+      if (!confirm('この単語のスケジュールを削除しますか？')) return;
       // 編集中の項目が削除された場合は編集モードを解除しておく（不整合防止）
       if (editingEntryId === id) exitEntryEditMode();
       entries = entries.filter(e => e.id !== id);
@@ -101,8 +103,9 @@ function buildAndValidateWordEntry(showError){
   const planMode = document.querySelector('input[name="planMode"]:checked').value;
   const amountPerDay = Number(document.getElementById('amountPerDay').value);
 
-  if(!startNum || !endNum || endNum < startNum){
-    showError('開始番号・終了番号を正しく入力してください（終了番号は開始番号以上）。'); return null;
+  // 【修正】小数（例: 1.5）や 0・負数を弾く。小数が通ると範囲・復習キーが小数になり計算が崩れる
+  if(!Number.isInteger(startNum) || !Number.isInteger(endNum) || startNum < 1 || endNum < startNum){
+    showError('開始番号・終了番号を正しく入力してください（1以上の整数で、終了番号は開始番号以上）。'); return null;
   }
   if(!startDate){ showError('開始日を選択してください。'); return null; }
 
@@ -114,7 +117,7 @@ function buildAndValidateWordEntry(showError){
 
   if(weekdays.length === 0){ showError('学習する曜日を1つ以上選んでください。'); return null; }
   if(intervals.length === 0){ showError('復習のタイミングを1つ以上選んでください。'); return null; }
-  if(planMode === 'byAmount' && (!amountPerDay || amountPerDay <= 0)){
+  if(planMode === 'byAmount' && (!Number.isInteger(amountPerDay) || amountPerDay <= 0)){
     showError('1日あたりの単語数を正しく入力してください。'); return null;
   }
 
