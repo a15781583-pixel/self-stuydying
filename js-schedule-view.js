@@ -108,20 +108,93 @@ function buildDayReviewItemHtml(r, kind) {
 }
 // ──────────────────────────────────────────────────────────────
 
+/* ───────── 復習の完了状態を書き込む「唯一の入口」 ───────── */
+// 復習の完了は「reviewDoneSet（完了済みキー）」と「dailyProgress（進捗記録）」の2か所に表れる。
+// チェックボックス・進捗入力パネルのどちらから操作しても、必ずこの関数群を通して
+// 両方を同じ状態にする。
+// （以前はチェックボックスが reviewDoneSet だけを更新していたため、パネルで完了した復習を
+//   チェックボックスで外しても、dailyProgress 側の完了記録が残って「完了」に戻ってしまっていた）
+
+// 期限超過で日付移動した復習のキー（`originalKey_moved_YYYY-MM-DD`）から、サフィックスを除いた元のキーを返す。
+// computeEffectiveReviewDate は元のキーで reviewDoneSet / dailyProgress を照合する。
+function getReviewBaseKey(key){
+  return String(key).replace(MOVED_KEY_SUFFIX_RE, '');
+}
+function isReviewProgressRecord(p){
+  return p.type === 'word-review' || p.type === 'book-review';
+}
+
+// 表示中の復習1件を key から探す（チェックボックスは key しか持たないため、範囲・教材名はここで補う）
+function findScheduledReviewByKey(key){
+  const { vocabReviews, refReviews } = buildScheduleData();
+  const w = vocabReviews.find(r => r.key === key);
+  if(w) return { review: w, type: 'word-review' };
+  const b = refReviews.find(r => r.key === key);
+  return b ? { review: b, type: 'book-review' } : null;
+}
+
+// 復習1件の進捗を記録する（進捗入力パネル・チェックボックス「ON」の共通処理）。
+// actualEnd が plannedEnd 以上なら完了（reviewDoneSet に追加）、未満なら未完了（reviewDoneSet から削除）。
+function recordReviewProgress({ reviewKey, type, dateStr, plannedStart, plannedEnd, actualEnd, bookName }){
+  dailyProgress = dailyProgress.filter(
+    p => !(p.date === dateStr && p.reviewKey === reviewKey && p.type === type)
+  );
+  const record = {
+    id: genId('dp_'),
+    date: dateStr,
+    reviewKey,
+    type,
+    plannedStart,
+    plannedEnd,
+    actualEnd,
+    bookName: bookName || '',
+    notProgressed: actualEnd === plannedStart - 1  // 進捗なし（actualEnd === plannedStart - 1）のフラグ
+  };
+  dailyProgress.push(record);
+  const baseKey = getReviewBaseKey(reviewKey);
+  if(actualEnd >= plannedEnd){ reviewDoneSet.add(baseKey); } else { reviewDoneSet.delete(baseKey); }
+  return record;
+}
+
+// 復習1件の「完了」を取り消す（チェックボックス「OFF」の処理）。
+// reviewDoneSet から外すだけでなく、dailyProgress に残っている「完了」記録も取り除く。
+// 「途中まで」「進んでいない」の記録は完了ではないので残す（週のまとめの集計に使われるため）。
+function clearReviewCompletion(reviewKey){
+  const baseKey = getReviewBaseKey(reviewKey);
+  reviewDoneSet.delete(baseKey);
+  dailyProgress = dailyProgress.filter(p => !(
+    isReviewProgressRecord(p) && p.reviewKey && getReviewBaseKey(p.reviewKey) === baseKey &&
+    !p.notProgressed && p.actualEnd >= p.plannedEnd
+  ));
+}
+
 /* ───────── 復習チェックボックスの動き ───────── */
 // 復習チェックボックスにクリックイベントを設定する共通関数。
-// チェック/解除のたびに保存し、全スケジュール表示を再描画する。
+// チェック＝「全範囲を完了」として進捗入力パネルと同じ記録を残す。解除＝完了記録ごと取り消す。
+// 保存のたびに、全スケジュール表示を再描画する。
 function attachReviewCheckHandlers(container){
   if(!container) return;
   container.querySelectorAll('.review-check').forEach(cb => {
     cb.addEventListener('change', () => {
       const key = cb.dataset.key;
-      // 【Bug 1 修正】期限超過で日付移動した復習項目のキーは movedKey（例: `originalKey_moved_YYYY-MM-DD`）になっている。
-      // computeEffectiveReviewDate は originalKey（サフィックスなし）で reviewDoneSet を照合するため、
-      // ここで _moved_YYYY-MM-DD サフィックスを除去した originalKey をセットに保存することでミスマッチを解消する。
-      const originalKey = key.replace(MOVED_KEY_SUFFIX_RE, '');
-      if(cb.checked){ reviewDoneSet.add(originalKey); } else { reviewDoneSet.delete(originalKey); }
+      if(cb.checked){
+        const found = findScheduledReviewByKey(key);
+        if(found){
+          const r = found.review;
+          recordReviewProgress({
+            reviewKey: key, type: found.type, dateStr: todayISO(),
+            plannedStart: r.rangeStart, plannedEnd: r.rangeEnd, actualEnd: r.rangeEnd,
+            bookName: r.bookName
+          });
+        } else {
+          // 念のためのフォールバック（該当の復習が見つからない場合は従来どおり完了キーだけ保存）
+          reviewDoneSet.add(getReviewBaseKey(key));
+        }
+      } else {
+        clearReviewCompletion(key);
+      }
       saveReviewDone();
+      saveDailyProgress();
       refreshAllSchedules();
       renderIntegratedSchedule();
       renderRefTodayCard(); // 参考書「今日やること」カードを同期更新
@@ -1357,29 +1430,11 @@ function handleProgressSave(dateStr, baseId) {
     if (type === 'word-review' || type === 'book-review') {
       // ── 復習タスクの進捗記録（reviewKey で識別）──
       const reviewKey = input.dataset.reviewKey;
-      dailyProgress = dailyProgress.filter(
-        p => !(p.date === dateStr && p.reviewKey === reviewKey && p.type === type)
-      );
-      const record = {
-        id: genId('dp_'),
-        date: dateStr,
-        reviewKey,
-        type,
-        plannedStart,
-        plannedEnd,
-        actualEnd: val,
-        bookName,
-        notProgressed: val === plannedStart - 1  // ← 追加: 進捗なし（actualEnd === plannedStart - 1）のフラグ
-      };
-      dailyProgress.push(record);
-      // ── reviewDoneSet を進捗状態と連動して更新 ──
-      // val が plannedEnd に達していれば完了済みとしてセットに追加し、
-      // 未達の場合（途中・進捗なし含む）は削除してカレンダーに残すようにする。
-      if (val >= plannedEnd) {
-        reviewDoneSet.add(reviewKey.replace(MOVED_KEY_SUFFIX_RE, ''));
-      } else {
-        reviewDoneSet.delete(reviewKey.replace(MOVED_KEY_SUFFIX_RE, '')); // originalKey を削除
-      }
+      // チェックボックスと同じ共通関数で記録する（dailyProgress と reviewDoneSet を同時に更新）。
+      // val が plannedEnd に達していれば完了、未達（途中・進捗なし含む）なら未完了としてカレンダーに残す。
+      const record = recordReviewProgress({
+        reviewKey, type, dateStr, plannedStart, plannedEnd, actualEnd: val, bookName
+      });
       savedRecords.push(record);
       saved++;
     } else {
