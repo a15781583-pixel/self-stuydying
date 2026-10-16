@@ -6,8 +6,8 @@
 <title>Self STUDYing</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@500;700&family=Noto+Sans+JP:wght@400;500;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.4/purify.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.4/purify.min.js" defer></script>
 <link rel="stylesheet" href="css-style.css">
 <link rel="stylesheet" href="css-ai-features.css">
 </head>
@@ -78,6 +78,12 @@
         </div>
       </div>
     </div>
+
+    <!-- ★ 完了後の「次のタスク設定」案内（一連の学習＋復習がすべて完了したときだけ表示） -->
+    <div id="completionPromptArea"></div>
+
+    <!-- ★ 今週のまとめ（完了・途中・未完了の件数と割合） -->
+    <section class="weekly-summary-card" id="weeklySummaryCard" aria-label="今週のまとめ"></section>
 
     <h3 class="sub-head">全体のスケジュール</h3>
     
@@ -278,10 +284,14 @@
           <button id="saveRefPlanBtn" class="btn-primary" style="flex:1; min-width:200px;">スケジュールを生成して登録</button>
           <button id="cancelRefEditBtn" class="btn-ghost" style="display:none;">編集をキャンセル</button>
         </div>
-        <div class="entry-list" id="refEntryList"></div>
 
       </div><!-- /.ref-setting-body -->
-    </details>
+    </details><!-- /#refSettingDetails -->
+
+    <!-- 登録済み一覧は折りたたみの外に置く（登録後に設定欄を閉じても一覧が見えるように） -->
+    <div class="entry-list" id="refEntryList"></div>
+
+    </details><!-- /#refSetup -->
 
   </div>
 
@@ -498,8 +508,16 @@
   <div id="ai-features-container"></div>
 
   <!-- ★③ ここに追記：JavaScriptの読み込み（</body>直前） -->
-  <script src="js-app.js" defer></script>
-  <script src="js-ai-features.js" defer></script>
+  <!-- ===== JavaScript（上から順に読み込まれます。順番を入れ替えないでください） =====
+       ファイルを修正したら、下の ?v= の数字（日付など）を変えると、生徒のブラウザに古い版が残りません ===== -->
+  <script src="js-common.js" defer></script>          <!-- 設定・共通の道具（最初） -->
+  <script src="js-word.js" defer></script>            <!-- ① 単語スケジュール設定タブ -->
+  <script src="js-reference.js" defer></script>       <!-- ② 参考書スケジュール設定タブ -->
+  <script src="js-schedule-calc.js" defer></script>   <!-- ③-a スケジュールへの反映（計算） -->
+  <script src="js-schedule-view.js" defer></script>   <!-- ③-b スケジュールへの反映（画面） -->
+  <script src="js-test.js" defer></script>            <!-- ④ 単語テスト・苦手単語・成績 -->
+  <script src="js-main.js" defer></script>            <!-- タブ切替・起動処理（必ず最後から2番目） -->
+  <script src="js-ai-features.js" defer></script>     <!-- AI学習計画・AI弱点分析（既存・最後） -->
 
 </body>
 </html>
