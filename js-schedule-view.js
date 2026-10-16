@@ -1098,7 +1098,9 @@ function initProgressControls(container, dateStr, baseId) {
       if (btnDone)           btnDone.classList.toggle('prog-btn-active',           mode === 'done');
       if (btnPartial)        btnPartial.classList.toggle('prog-btn-active',        mode === 'partial');
       if (btnNotProgressed)  btnNotProgressed.classList.toggle('prog-btn-active',  mode === 'not-progressed'); // ★追加
-      if (partialPanel)      partialPanel.style.display = (mode === 'partial') ? 'block' : 'none';
+      // 直接入力中（フォーカス中）は、値に応じて状態が変わってもパネルを閉じない（入力が途切れるのを防ぐ）
+      const typing = progDisplayInput && document.activeElement === progDisplayInput;
+      if (partialPanel)      partialPanel.style.display = (mode === 'partial' || typing) ? 'block' : 'none';
       // 「途中まで」「進んでいない」どちらに切り替えても余剰パネルは閉じる
       if (extraPanel && mode !== 'done') extraPanel.style.display = 'none';
       updateStep1Label(mode);
@@ -1184,33 +1186,46 @@ function initProgressControls(container, dateStr, baseId) {
 
     /* ── 直接入力フィールド ── */
     if (progDisplayInput) {
+      // 値を反映し、状態ボタンも切り替える。クランプ後の値を返す
+      const applyTyped = (val) => {
+        const clampedVal = Math.max(rangeStart - 1, Math.min(rangeEnd + 50, val));
+        const completedCount = Math.max(0, clampedVal - rangeStart + 1);
+        const pct = plannedCount > 0 ? Math.min(100, Math.round(completedCount / plannedCount * 100)) : 0;
+        if (barFill)     barFill.style.width = pct + '%';
+        if (countValEl)  countValEl.textContent = completedCount;
+        if (progDisplay) progDisplay.textContent = clampedVal;
+        hiddenInput.value = clampedVal;
+        hiddenInput.dispatchEvent(new Event('input'));
+        if (clampedVal >= rangeEnd)             setActiveState('done');
+        else if (clampedVal === rangeStart - 1) setActiveState('not-progressed');
+        else                                    setActiveState('partial');
+        return clampedVal;
+      };
+
+      // 入力中：空欄や「開始より前の値」は桁を消している途中かもしれないので何もしない
       progDisplayInput.addEventListener('input', () => {
-        const val = parseInt(progDisplayInput.value, 10);
-        if (!isNaN(val)) {
-          const clampedVal = Math.max(rangeStart - 1, Math.min(rangeEnd + 50, val));
-          const completedCount = Math.max(0, clampedVal - rangeStart + 1);
-          const pct = plannedCount > 0 ? Math.min(100, Math.round(completedCount / plannedCount * 100)) : 0;
-          if (barFill)    barFill.style.width   = pct + '%';
-          if (countValEl) countValEl.textContent = completedCount;
-          if (progDisplay) progDisplay.textContent = clampedVal;
-          hiddenInput.value = clampedVal;
-          hiddenInput.dispatchEvent(new Event('input'));
-          // 値に応じてボタン状態を自動切り替え
-          if (clampedVal >= rangeEnd) {
-            setActiveState('done');
-          } else if (clampedVal === rangeStart - 1) {
-            setActiveState('not-progressed');
-          } else {
-            setActiveState('partial');
-          }
-        }
+        const raw = progDisplayInput.value.trim();
+        if (raw === '') return;
+        const val = parseInt(raw, 10);
+        if (isNaN(val) || val < rangeStart) return;
+        applyTyped(val);
       });
+
+      // 確定時（フォーカスが外れたとき／Enter）：ここで初めて範囲外を丸める
       progDisplayInput.addEventListener('blur', () => {
-        // ブラー時に範囲外の値をクランプして同期
-        const val = parseInt(hiddenInput.value, 10);
-        if (!isNaN(val)) progDisplayInput.value = val;
+        const val = parseInt(progDisplayInput.value, 10);
+        if (isNaN(val)) {                       // 空欄のまま離れたら直前の有効値に戻す
+          progDisplayInput.value = hiddenInput.value;
+          // 入力中は開いたままだったパネルを、現在の値に合わせて整える（値は変更しない）
+          const cur = parseInt(hiddenInput.value, 10);
+          if (!isNaN(cur)) {
+            setActiveState(cur >= rangeEnd ? 'done' : (cur === rangeStart - 1 ? 'not-progressed' : 'partial'));
+          }
+          return;
+        }
+        progDisplayInput.value = applyTyped(val);
       });
-      // Enterキーで入力確定
+
       progDisplayInput.addEventListener('keydown', e => {
         if (e.key === 'Enter') { e.preventDefault(); progDisplayInput.blur(); }
       });
