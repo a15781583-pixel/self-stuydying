@@ -15,16 +15,12 @@ function showTab(tabName) {
   const tabEl = document.getElementById('tab-' + tabName);
   if (tabEl) tabEl.style.display = 'block';
 
-  // 「スケジュール」タブを開いたときは、最新の統合スケジュールを再描画する
-  if (tabName === 'schedule') {
-    renderIntegratedSchedule();
-  }
-
   // デスクトップ用タブボタンの切り替え
   const tabBtns = { schedule:'tabSchedule', study:'tab-btn-study', coach:'tab-btn-coach',
                     analysis:'tab-btn-analysis', reference:'tab-btn-reference' };
   Object.entries(tabBtns).forEach(([name, id]) => {
-    const el = document.getElementById(id);
+    // 【修正】スケジュールだけ ID の命名規則が異なるため、見つからない場合は tab-btn-◯◯ も探す
+    const el = document.getElementById(id) || document.getElementById('tab-btn-' + name);
     if (el) el.className = name === tabName ? 'btn-primary' : 'btn-ghost';
   });
 
@@ -39,6 +35,14 @@ function showTab(tabName) {
   if (window.innerWidth <= 640) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
+
+  // 「スケジュール」タブを開いたときは、最新の統合スケジュールを再描画する
+  // 【修正】描画を最後に回し、例外が出てもタブ切り替え（表示・ボタン・ボトムナビ）自体は必ず完了させる。
+  //   以前は描画で例外が出ると、タブのボタン状態が更新されないまま処理が止まっていた。
+  if (tabName === 'schedule') {
+    try { renderIntegratedSchedule(); }
+    catch (e) { console.error('[showTab] スケジュールの描画に失敗:', e); }
+  }
 }
 
 // [ai-features.html] AI Coaching API Chat Logic（chatHistory / abortController / DOM参照 /
@@ -47,8 +51,11 @@ function showTab(tabName) {
 // [ai-features.html] loadSavedApiKey / saveApiKey / setupApiKeyPersistence → ai-features.html に移動
 
 (async function init(){
-  buildWeekdayChips();
-  buildIntervalChips();
+  // 【修正】チップ生成で例外が出ても、後続の起動処理（データ読込・スケジュール表示）を止めない
+  try {
+    buildWeekdayChips();
+    buildIntervalChips();
+  } catch (e) { console.error('[init] チップ生成に失敗:', e); }
   const startDateEl = document.getElementById('startDate');
   if (startDateEl) startDateEl.value = todayISO();
   document.getElementById('addBtn')?.addEventListener('click', handleAdd);
@@ -68,6 +75,9 @@ function showTab(tabName) {
       }
     });
   });
+
+  // 【追加】初期表示でも、選択中の割り振り方法に合わせて入力欄の表示を揃える
+  document.querySelector('input[name="planMode"]:checked')?.dispatchEvent(new Event('change'));
 
   // 期間ラジオボタンが切り替わったら再描画
   document.querySelectorAll('input[name="schedulePeriod"]').forEach(radio => {
