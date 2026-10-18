@@ -391,8 +391,8 @@ function renderIntegratedSchedule() {
   let futureDayCount = 0;
 
   function buildDayCard(i, currentLoopDate, dateStr) {
-    const dayWords = allWordChunks.filter(chunk => chunk.date.startsWith(dateStr));
-    const dayBooks = allBookChunks.filter(chunk => chunk.date.startsWith(dateStr));
+    const dayWords = allWordChunks.filter(chunk => chunk.date.startsWith(dateStr)).sort((a, b) => a.rangeStart - b.rangeStart); // 【修正】番号順に並べる
+    const dayBooks = allBookChunks.filter(chunk => chunk.date.startsWith(dateStr)).sort((a, b) => a.rangeStart - b.rangeStart);
     const dayWordReviews = allWordReviews.filter(r => r.date.startsWith(dateStr));
     const dayBookReviews = allBookReviews.filter(r => r.date.startsWith(dateStr));
 
@@ -425,9 +425,9 @@ function renderIntegratedSchedule() {
     }
 
     // 進捗入力UIの対象チャンクを i===0 のときのみ算出（HTML生成・イベント設定の両方で共用）
-    const dayWordsForProgress       = i === 0 ? allWordChunks.filter(c => c.date.startsWith(dateStr)) : null;
+    const dayWordsForProgress       = i === 0 ? dayWords : null;
     // 繰り越し分も含めた allBookChunks を使うことで、繰り越し参考書も進捗入力対象にする
-    const dayBooksForProgress       = i === 0 ? allBookChunks.filter(c => c.date.startsWith(dateStr)) : null;
+    const dayBooksForProgress       = i === 0 ? dayBooks : null;
     // 未完了の復習タスクも進捗入力対象にする
     const dayWordReviewsForProgress = i === 0 ? dayWordReviews.filter(r => !r.done) : null;
     const dayBookReviewsForProgress = i === 0 ? dayBookReviews.filter(r => !r.done) : null;
@@ -1388,7 +1388,7 @@ function previewProgressAdjustment(container, dateStr, baseId) {
     if (hasNotProgressed) {
       // 「進んでいない」タスクごとに繰越メッセージを1行ずつ表示
       notProgressedNote.innerHTML = notProgressedLabels
-        .map(l => `🚫 ${escapeHtml(l)}: 進んでいないため、この範囲は次の学習日に繰り越されます。`)
+        .map(l => `🚫 ${escapeHtml(l)}: 進んでいないため、この範囲は未完了のまま残り、翌日以降に繰り越されます。`)
         .join('<br>');
       notProgressedNote.style.display = 'block';
     } else {
@@ -1551,7 +1551,7 @@ function buildWordReviewPreviewHtml(dateStr, wordRecords) {
             <span class="range-badge">${rec.plannedStart}〜${rec.plannedEnd}番</span>
           </div>
           <div class="progressed-undershot" style="background:#fff7ed;border-color:#fed7aa;color:#9a3412;">
-            🚫 進んでいないため、この範囲は次の学習日に繰り越されます。
+            🚫 進んでいないため、この範囲は未完了のまま残り、翌日以降に繰り越されます。
           </div>
         </div>`;
       return; // 復習スロット生成をスキップ
