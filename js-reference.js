@@ -95,15 +95,16 @@ onDomReady(() => {
  */
 function buildAndValidateRefEntry(showError){
   const bookName = document.getElementById('refBookName').value.trim();
-  const startNum = parseInt(document.getElementById('refStartPage').value, 10);
-  const endNum = parseInt(document.getElementById('refEndPage').value, 10);
+  const startNum = Number(document.getElementById('refStartPage').value);
+  const endNum = Number(document.getElementById('refEndPage').value);
   const startDate = document.getElementById('refStartDate').value;
   const planMode = document.querySelector('input[name="refPlanMode"]:checked').value;
   const weekdays = getCheckedValues('refWeekdayRow');
   const intervals = getCheckedValues('refIntervalRow');
 
-  if (!bookName || isNaN(startNum) || isNaN(endNum) || startNum < 0 || endNum < 0 || !startDate) {
-    showError('すべての項目を正しく入力してください。');
+  // 【修正】単語側と同じく、1以上の整数のみ許可（0や小数の黙った切り捨てを防ぐ）
+  if (!bookName || !Number.isInteger(startNum) || !Number.isInteger(endNum) || startNum < 1 || endNum < 1 || !startDate) {
+    showError('すべての項目を正しく入力してください（ページは1以上の整数）。');
     return null;
   }
   if (startNum > endNum) {
