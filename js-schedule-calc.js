@@ -130,13 +130,23 @@ function buildProgressReviews(progressItems, prefix, getResolved, getEntity, get
       if (!(p.actualEnd >= p.plannedStart)) return null;
       return entity ? { p, resolved, entity } : null;
     })
-    .filter(Boolean);
+    .filter(Boolean)
+    // 【修正】同日・同教材で範囲が重なった番号（余剰入力など）を二重に復習しない
+    .sort((a, b) => a.p.date.localeCompare(b.p.date) || a.p.plannedStart - b.p.plannedStart);
+  const lastEnd = new Map();
+  resolvedItems.forEach(it => {
+    const k = it.resolved + '_' + it.p.date;
+    const prev = lastEnd.get(k) ?? -Infinity;
+    it.reviewStart = Math.max(it.p.plannedStart, prev + 1);
+    lastEnd.set(k, Math.max(prev, it.p.actualEnd));
+  });
+  const reviewItems = resolvedItems.filter(it => it.reviewStart <= it.p.actualEnd);
 
   return buildReviewEntries(
-    resolvedItems,
+    reviewItems,
     (item, n) => `${prefix}_prog_${item.resolved}_${item.p.date}_${item.p.plannedStart}_${n}`,
     item => item.p.date,
-    item => ({ rangeStart: item.p.plannedStart, rangeEnd: item.p.actualEnd }),
+    item => ({ rangeStart: item.reviewStart, rangeEnd: item.p.actualEnd }), // キーは plannedStart のまま、表示範囲だけ補正
     item => getIntervals(item.entity),
     item => extraFields(item.p, item.resolved, item.entity)
   );
