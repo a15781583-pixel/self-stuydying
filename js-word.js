@@ -156,5 +156,12 @@ async function handleAdd(){
     idPrefix: 'e_',
     save: saveEntries,
     render: renderAll,
+    // 【修正】登録後は次の開始番号を自動入力し、終了番号を空にする（再クリックによる二重登録を防ぐ）
+    afterSave: () => {
+      const endEl = document.getElementById('endNum');
+      const next = Number(endEl.value) + 1;
+      document.getElementById('startNum').value = Number.isInteger(next) ? next : '';
+      endEl.value = '';
+    },
   });
 }
