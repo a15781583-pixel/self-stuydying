@@ -1376,12 +1376,26 @@
   }
   .prog-extra-confirm-btn:hover { background: #1b5e20; }
 
-  /* ─ モバイル最適化 ─ */
+  /* ─ 「＋ 予定より多く進んだ」リンク（余剰パネルを開く） ─ */
+  .prog-extra-open-link {
+    background: none; border: none; box-shadow: none;
+    color: var(--ink-soft); font-size: .75rem; text-decoration: underline;
+    padding: 6px 0 0; cursor: pointer;
+  }
+
+  /* ─ モバイル最適化（進捗入力をコンパクトに：3ボタンを1段に・余白を詰める） ─ */
   @media (max-width: 640px) {
-    .prog-btn { padding: 12px 14px; font-size: .92rem; min-height: 44px; }
-    .prog-toggle { gap: 6px; }
-    .prog-partial-panel { padding: 10px 10px; }
-    .prog-display-input { width: 64px; font-size: .98rem; }
+    .prog-step1-label { display: none; }  /* 「完了しましたか？」行は省略 */
+    .prog-toggle { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+    .prog-btn {
+      padding: 7px 2px; font-size: .75rem; min-height: 34px;
+      justify-content: center; text-align: center; line-height: 1.2; border-radius: 6px;
+    }
+    .prog-partial-panel { padding: 8px 10px; }
+    .prog-display-input { width: 60px; font-size: .95rem; padding: 3px 6px; }
+    .prog-extra-panel { padding: 6px 8px; margin-top: 6px; }
+    .prog-extra-heading { font-size: .72rem; margin-bottom: 4px; }
+    .progress-item { padding: 6px 0; gap: 4px; }
   }
 
 
