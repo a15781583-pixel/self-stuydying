@@ -54,6 +54,13 @@ onDomReady(() => {
         setList: (arr) => { refEntries = arr; },
         getEditingId: () => editingRefEntryId,
         exitEditMode: exitRefEditMode,
+        // 【追加】編集保存後は、編集を始める前のフォーム内容へ戻す（復習間隔・曜日などの持ち越し防止）
+        finishEditAfterSave: finishRefEditAfterSave,
+        // 【追加】範囲を変えると進捗記録が削除されるため、記録がある場合は保存前に確認する
+        confirmEdit: (item, nf) =>
+          (item.startNum === nf.startNum && item.endNum === nf.endNum) ||
+          !dailyProgress.some(p => p.type === 'book' && (p.planId || p.entryId) === item.id) ||
+          confirm('範囲（開始・終了ページ）を変えると、この参考書のこれまでの進捗記録が削除されます。続けますか？'),
         // 参考書は編集時、旧プランをスプレッドせず新しいフィールド一式に置き換える
         // （byAmount/byRangeの切替時に古いendDate/amountPerDayが残らないようにするため）
         applyEdit: (item, newFields) => {
@@ -68,11 +75,14 @@ onDomReady(() => {
         idPrefix: 'ref_',
         save: saveRefEntries,
         render: renderRefSchedule,
-        afterSave: () => {
+        afterSave: ({ wasEditing } = {}) => {
           // 入力欄をクリア（教材名・ページ番号のみ）
-          document.getElementById('refBookName').value = '';
-          document.getElementById('refStartPage').value = '';
-          document.getElementById('refEndPage').value = '';
+          // 編集保存の場合は、編集前の入力内容を復元済みなので消さない
+          if (!wasEditing) {
+            document.getElementById('refBookName').value = '';
+            document.getElementById('refStartPage').value = '';
+            document.getElementById('refEndPage').value = '';
+          }
 
           // 登録完了後：設定アコーディオンを閉じて「今日の確認」に注目させる
           const settingDetails = document.getElementById('refSettingDetails');
@@ -246,6 +256,7 @@ function setRefFormState(state){ refFormController.setFormState(state); }
 function startEditRefEntry(id){ refFormController.startEdit(id); }
 function exitRefEditMode(){ refFormController.exitEditMode(); }
 function cancelEditRefEntry(){ refFormController.cancelEdit(); }
+function finishRefEditAfterSave(){ refFormController.finishEditAfterSave(); }
 
 // ⑤ 参考書タブ全体の再描画（登録リスト＋今日やること）
 function renderRefSchedule() {
