@@ -935,6 +935,7 @@ function buildProgControlHtml(rangeStart, rangeEnd, recordedVal, type, statusHtm
         </div>
       </div>
       ${!isReviewType ? `
+      <button type="button" class="prog-extra-open-link"${isDone && extraPages === 0 ? '' : ' style="display:none"'}>＋ 予定より多く進んだ</button>
       <div class="prog-extra-panel"${isDone && extraPages > 0 ? '' : ' style="display:none"'}>
         <div class="prog-extra-heading">さらに余剰${isWordType ? '個数' : 'ページ'}はありましたか？</div>
         <div class="prog-extra-options">
@@ -1116,10 +1117,29 @@ function buildProgressInputSection(dateStr, dayWords, dayBooks, baseId, dayWordR
                 onclick="handleProgressSave('${dateStr}', '${baseId}')">
           📌 進捗を記録してスケジュールを調整
         </button>
+        <button class="btn-ghost" style="font-size:.8rem;"
+                onclick="markAllProgressDone('${baseId}')">
+          ✅ 未入力をすべて完了に
+        </button>
         ${hasAnyRecord ? `<button class="btn-ghost" style="font-size:.8rem;"
                 onclick="handleProgressClear('${dateStr}')">記録をリセット</button>` : ''}
       </div>
     </div>`;
+}
+
+/**
+ * 【追加】まだ何も選んでいない項目だけを、まとめて「完了」にする（モバイルでのタップ数削減用）。
+ * すでに「完了／途中まで／進んでいない」を選んだ項目・記録済みの項目は変更しない。
+ * 「完了」にするだけで、保存は「📌 進捗を記録…」ボタンで行う。
+ */
+function markAllProgressDone(baseId) {
+  const section = document.getElementById(`progress-section-${baseId}`);
+  if (!section) return;
+  section.querySelectorAll('.prog-control-ui').forEach(ui => {
+    const hidden = ui.querySelector('.progress-num-input');
+    const doneBtn = ui.querySelector('.prog-btn-done');
+    if (hidden && doneBtn && hidden.value === '') doneBtn.click();
+  });
 }
 
 /**
@@ -1142,6 +1162,7 @@ function initProgressControls(container, dateStr, baseId) {
     const countValEl     = ui.querySelector('.prog-count-val');
     const step1Label     = ui.querySelector('.prog-step1-label');
     const extraPanel     = ui.querySelector('.prog-extra-panel');
+    const extraLink      = ui.querySelector('.prog-extra-open-link'); // 余剰パネルを開く小さなリンク
 
     const rangeStart   = parseInt(hiddenInput.dataset.plannedStart, 10);
     const rangeEnd     = parseInt(hiddenInput.dataset.plannedEnd,   10);
@@ -1180,6 +1201,7 @@ function initProgressControls(container, dateStr, baseId) {
       if (partialPanel)      partialPanel.style.display = (mode === 'partial' || typing) ? 'block' : 'none';
       // 「途中まで」「進んでいない」どちらに切り替えても余剰パネルは閉じる
       if (extraPanel && mode !== 'done') extraPanel.style.display = 'none';
+      if (extraLink  && mode !== 'done') extraLink.style.display  = 'none';
       updateStep1Label(mode);
     }
 
@@ -1188,12 +1210,22 @@ function initProgressControls(container, dateStr, baseId) {
       btnDone.addEventListener('click', () => {
         updateDisplay(rangeEnd);
         setActiveState('done');
-        // ★ 余剰ページパネルを表示し、入力値を 0 にリセット
+        // 【変更】余剰パネルは自動で開かず、入力値だけ 0 にリセットして小さなリンクを出す
+        //   （「完了」は最も多い操作のため、毎回パネルが開くと手数が増える）
         if (extraPanel) {
           const extraInput = extraPanel.querySelector('.prog-extra-input');
           if (extraInput) extraInput.value = '0';
-          extraPanel.style.display = 'block';
+          extraPanel.style.display = 'none';
         }
+        if (extraLink) extraLink.style.display = 'inline-block';
+      });
+    }
+
+    /* ── 「＋ 予定より多く進んだ」リンク：余剰パネルを開く ── */
+    if (extraLink && extraPanel) {
+      extraLink.addEventListener('click', () => {
+        extraPanel.style.display = 'block';
+        extraLink.style.display = 'none';
       });
     }
 
@@ -1204,6 +1236,7 @@ function initProgressControls(container, dateStr, baseId) {
       if (extraNoBtn) {
         extraNoBtn.addEventListener('click', () => {
           extraPanel.style.display = 'none';
+          if (extraLink) extraLink.style.display = 'inline-block';
           // hiddenInput は既に rangeEnd なのでそのまま、プレビューだけ更新
           hiddenInput.dispatchEvent(new Event('input'));
         });
@@ -1230,6 +1263,7 @@ function initProgressControls(container, dateStr, baseId) {
           hiddenInput.value = rangeEnd + extraPages;
           hiddenInput.dispatchEvent(new Event('input')); // previewProgressAdjustment を起動
           extraPanel.style.display = 'none';
+          if (extraLink) extraLink.style.display = 'inline-block';
         });
       }
     }
