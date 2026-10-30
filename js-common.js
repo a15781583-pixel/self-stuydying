@@ -288,6 +288,13 @@ function createFormController(cfg){
       const cancelBtn = document.getElementById(cfg.cancelBtnId);
       if (cancelBtn) cancelBtn.style.display = 'none';
     },
+    // 編集内容の保存が成功した後：編集モードを抜け、フォームを「編集を始める前の状態」に戻す
+    // （戻さないと、編集した項目の復習間隔・曜日などが次の新規登録に持ち越されてしまう）
+    finishEditAfterSave(){
+      const snapshot = cfg.getSnapshot();
+      controller.exitEditMode();
+      if (snapshot) controller.setFormState(snapshot);
+    },
     // 「編集をキャンセル」ボタン押下時：フォームを編集前の状態に戻す
     cancelEdit(){
       const snapshot = cfg.getSnapshot();
@@ -329,11 +336,15 @@ async function handleSaveEntry(cfg){
   //   「保存した」ように見えていた。その場合は新規追加として扱う。
   const isEditing = !!editingId && list.some(item => item.id === editingId);
 
+  // 【追加】進捗記録が消えるなど、取り消せない変更を伴う編集は、保存前に確認する（中止なら何も変更しない）
+  if (isEditing && cfg.confirmEdit && !cfg.confirmEdit(list.find(item => item.id === editingId), newFields)) return;
+
   if (isEditing) {
     // 編集モード：IDを維持したまま内容だけ差し替える
     // （IDを変えると復習履歴・進捗記録との紐付けが切れてしまうため）
     cfg.setList(list.map(item => item.id === editingId ? cfg.applyEdit(item, newFields) : item));
-    cfg.exitEditMode();
+    // 【修正】編集保存後は、フォームを編集前の状態へ戻す（finishEditAfterSave 未指定なら従来どおり）
+    (cfg.finishEditAfterSave || cfg.exitEditMode)();
   } else {
     if (editingId) cfg.exitEditMode(); // 編集対象が消えていた場合は編集モードを解除
     cfg.setList([...list, { ...newFields, id: genId(cfg.idPrefix) }]);
@@ -341,7 +352,7 @@ async function handleSaveEntry(cfg){
 
   await cfg.save();
   cfg.render();
-  cfg.afterSave?.();
+  cfg.afterSave?.({ wasEditing: isEditing });
 }
 
 /* ───────── HTMLエスケープの道具 ───────── */
