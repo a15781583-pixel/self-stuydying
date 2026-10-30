@@ -85,6 +85,7 @@ function setPlanFormState(state){ wordFormController.setFormState(state); }
 function startEditEntry(id){ wordFormController.startEdit(id); }
 function exitEntryEditMode(){ wordFormController.exitEditMode(); }
 function cancelEditEntry(){ wordFormController.cancelEdit(); }
+function finishEntryEditAfterSave(){ wordFormController.finishEditAfterSave(); }
 
 /* ───────── 単語登録の入力チェック ───────── */
 /**
@@ -143,6 +144,13 @@ async function handleAdd(){
     setList: (arr) => { entries = arr; },
     getEditingId: () => editingEntryId,
     exitEditMode: exitEntryEditMode,
+    // 【追加】編集保存後は、編集を始める前のフォーム内容へ戻す（復習間隔・曜日などの持ち越し防止）
+    finishEditAfterSave: finishEntryEditAfterSave,
+    // 【追加】範囲を変えると進捗記録が削除されるため、記録がある場合は保存前に確認する
+    confirmEdit: (item, nf) =>
+      (item.startNum === nf.startNum && item.endNum === nf.endNum) ||
+      !dailyProgress.some(p => p.type === 'word' && (p.originEntryId || p.entryId) === item.id) ||
+      confirm('範囲（開始・終了番号）を変えると、この単語のこれまでの進捗記録が削除されます。続けますか？'),
     applyEdit: (item, newFields) => {
       // ★修正：範囲（開始・終了番号）を変えた場合、旧範囲に基づく進捗記録を破棄する
       //   （残すと新範囲の外の番号が再配分されるため）
@@ -157,7 +165,8 @@ async function handleAdd(){
     save: saveEntries,
     render: renderAll,
     // 【修正】登録後は次の開始番号を自動入力し、終了番号を空にする（再クリックによる二重登録を防ぐ）
-    afterSave: () => {
+    afterSave: ({ wasEditing } = {}) => {
+      if (wasEditing) return; // 編集保存では次の番号の自動入力をしない（編集前のフォームへ復元済み）
       const endEl = document.getElementById('endNum');
       const next = Number(endEl.value) + 1;
       document.getElementById('startNum').value = Number.isInteger(next) ? next : '';
