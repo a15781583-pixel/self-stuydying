@@ -41,16 +41,20 @@ function computeEffectiveReviewDate(originalIso, key){
   //    別サイクルの復習を誤って「完了済み」と判定するのを防ぐ。
   //    moved 完了は line 1735 の reviewDoneSet.add(baseKey) で確実に記録されるため、
   //    isDoneInPanel は originalIso 以前のレコードのみ対象とすれば十分。
-  const isDoneInPanel = dailyProgress.some(p =>
+  // 完了を示す進捗記録（パネル／チェックボックス共通）。移動済みキー(_moved_)も元キーに戻して照合する
+  const isDoneRecord = p =>
     (p.type === 'word-review' || p.type === 'book-review') &&
     p.reviewKey != null && (p.reviewKey === key || p.reviewKey.replace(MOVED_KEY_SUFFIX_RE, '') === key) &&
-    p.date <= originalIso &&
     !p.notProgressed &&
-    p.actualEnd >= p.plannedEnd
-  );
+    p.actualEnd >= p.plannedEnd;
+  const isDoneInPanel = dailyProgress.some(p => isDoneRecord(p) && p.date <= originalIso);
 
   if(reviewDoneSet.has(key) || isDoneInPanel){
-    return { date: originalIso, delayedDays: 0, done: true };
+    // 【修正】遅れて完了した復習は、元の予定日ではなく「完了した日」に表示する。
+    //   元の予定日（過去）のままだと、チェックした瞬間に画面から消え、取り消せなかった。
+    const doneDates = dailyProgress.filter(isDoneRecord).map(p => p.date).sort();
+    const doneOn = doneDates.length ? doneDates[doneDates.length - 1] : originalIso;
+    return { date: doneOn > originalIso ? doneOn : originalIso, delayedDays: 0, done: true };
   }
   const todayIso  = todayISO();
   const diffDays  = Math.round(
@@ -351,12 +355,59 @@ function adjustReviewsForCarryForward(vocabReviews, refReviews, cfVocab, cfRef) 
 }
 
 /**
+ * 復習の「途中まで」記録を分割する（単語・参考書共通）。
+ *  ・実施した分 [開始〜到達]  … 完了扱い。キーは `<元キー>~d`（チェックを外すと途中まで記録ごと取り消す）
+ *  ・残り      [到達+1〜終了] … 記録日の翌日を期限とする新しい復習タスク。キーは `<元キー>~r<開始番号>`。
+ *                               翌日以降も未完了なら、通常の復習と同じく「今日」へ移動し遅れ日数が付く。
+ * 残りにさらに「途中まで」が記録された場合は、同じ規則で再帰的に分割する。
+ */
+function splitPartialReviews(reviews) {
+  const baseOf = k => String(k).replace(MOVED_KEY_SUFFIX_RE, '');
+  const out = [];
+  reviews.forEach(r => {
+    let cur = r;
+    for (let guard = 0; guard < 30; guard++) {
+      if (cur.done) { out.push(cur); return; }
+      const baseKey = baseOf(cur.key);
+      const partials = dailyProgress.filter(p =>
+        (p.type === 'word-review' || p.type === 'book-review') && p.reviewKey != null &&
+        baseOf(p.reviewKey) === baseKey && !p.notProgressed &&
+        p.plannedStart === cur.rangeStart && p.plannedEnd === cur.rangeEnd &&   // 範囲が変わった古い記録は無視
+        p.actualEnd >= p.plannedStart && p.actualEnd < p.plannedEnd);
+      if (!partials.length) { out.push(cur); return; }
+      const P = partials.sort((a, b) => b.date.localeCompare(a.date) || b.actualEnd - a.actualEnd)[0];
+      const reached = P.actualEnd;
+      // 実施した分：完了として、記録した日（早めに行った場合は本来の予定日）に表示する
+      // 残り：記録日の翌日が期限
+      const dueIso = formatISO(addDays(parseISO(P.date), 1));
+      // 実施した分：完了として、記録した日（早めに行った場合は本来の予定日）に表示する。
+      // remainderRange / remainderDue は「残りはいつ・どの範囲か」を画面に出すためのラベル用情報
+      out.push({ ...cur, rangeEnd: reached, key: `${baseKey}~d`,
+        date: P.date > cur.originalDate ? P.date : cur.originalDate,
+        delayedDays: 0, done: true, partialDone: true,
+        remainderRange: [reached + 1, cur.rangeEnd], remainderDue: dueIso });
+      const remKey = `${baseKey}~r${reached + 1}`;
+      const eff = computeEffectiveReviewDate(dueIso, remKey);
+      // rootOriginalDate: 最初に予定されていた復習日（残りに「元の期限」を表示するためのラベル用）
+      cur = { ...cur, rangeStart: reached + 1, key: eff.movedKey ?? remKey,
+        rootOriginalDate: cur.rootOriginalDate || cur.originalDate,
+        originalDate: dueIso, date: eff.date, delayedDays: eff.delayedDays, done: eff.done, isRemainder: true };
+    }
+    out.push(cur);
+  });
+  return out;
+}
+
+/**
  * スケジュール描画用の共通データ（チャンク・繰り上げ・復習調整済み）をまとめて返す。
  */
 function buildScheduleData() {
   const { vocabChunks: rawVocabChunks, refChunks: rawRefChunks, vocabReviews, refReviews } = buildAllReviews();
   const { cfVocab, cfRef } = getCarryForwardChunks(rawVocabChunks, rawRefChunks);
   const adjusted = adjustReviewsForCarryForward(vocabReviews, refReviews, cfVocab, cfRef);
+  // 復習の「途中まで」を、実施した分（完了）と残り（翌日以降のタスク）に分ける
+  adjusted.vocabReviews = splitPartialReviews(adjusted.vocabReviews);
+  adjusted.refReviews = splitPartialReviews(adjusted.refReviews);
   return {
     rawVocabChunks,
     rawRefChunks,
