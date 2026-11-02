@@ -109,16 +109,9 @@
       <summary class="setup-details-sub-summary">① 今週の範囲を登録</summary>
       <div class="field full" style="margin-bottom:14px;">
         <label>割り振り方法</label>
-        <div style="display:flex; gap:16px; margin-top:6px; flex-wrap:wrap;">
-          <label style="cursor:pointer; display:flex; align-items:center; gap:4px; font-size:.85rem;">
-            <!-- valueを byRange に変更し、文言を合わせます -->
-            <input type="radio" name="planMode" value="byRange" checked>
-            学習する曜日から設定（開始日〜終了日で均等に分ける）
-          </label>
-          <label style="cursor:pointer; display:flex; align-items:center; gap:4px; font-size:.85rem;">
-            <input type="radio" name="planMode" value="byAmount">
-            1日の単語数を指定する（終了番号まで数週間続く）
-          </label>
+        <div class="plan-mode-row">
+          <label><input type="radio" name="planMode" value="byRange" checked><span>期間で均等割り</span></label>
+          <label><input type="radio" name="planMode" value="byAmount"><span>1日の量を指定</span></label>
         </div>
       </div>
       <div class="form-grid">
@@ -148,7 +141,7 @@
           <label for="amountPerDay">1日の単語数</label>
           <input type="number" id="amountPerDay" min="1" placeholder="例: 30">
         </div>
-        <div class="field">
+        <div class="field full">
           <label>学習する曜日（新規を覚える日）</label>
           <div class="checkbox-row" id="weekdayRow"></div>
         </div>
@@ -233,15 +226,9 @@
 
           <div class="field full" style="margin-bottom: 14px;">
             <label>割り振り方法</label>
-            <div style="display:flex; gap:16px; margin-top:6px; flex-wrap:wrap;">
-              <label style="cursor:pointer; display:flex; align-items:center; gap:4px; font-size:.85rem;">
-                <input type="radio" name="refPlanMode" value="byRange" checked>
-                学習する曜日から設定（開始日〜終了日で均等に分ける）
-              </label>
-              <label style="cursor:pointer; display:flex; align-items:center; gap:4px; font-size:.85rem;">
-                <input type="radio" name="refPlanMode" value="byAmount">
-                1日の進める量を指定する（終了ページまで数週間続く）
-              </label>
+            <div class="plan-mode-row">
+              <label><input type="radio" name="refPlanMode" value="byRange" checked><span>期間で均等割り</span></label>
+              <label><input type="radio" name="refPlanMode" value="byAmount"><span>1日の量を指定</span></label>
             </div>
           </div>
 
@@ -292,13 +279,6 @@
     <div class="entry-list" id="refEntryList"></div>
 
     </details><!-- /#refSetup -->
-
-    <!-- 【追加】参考書の「今日の確認」（renderRefTodayCard の描画先） -->
-    <section class="card" id="refTodayCard">
-      <h3 class="sub-head">今日の確認</h3>
-      <div id="refTodayNewBox"></div>
-      <div id="refTodayReviewList"></div>
-    </section>
 
   </div>
 
