@@ -905,19 +905,19 @@
   /* [ai-features.html] AIチャットスタイル → ai-features.html に移動 */
   /* ---------- 進捗入力セクション ---------- */
   .progress-section {
-    margin-top: 14px;
-    padding: 14px 16px;
+    margin-top: 12px;
+    padding: 10px 12px;
     background: #f8fafc;
     border: 1.5px dashed var(--paper-line);
     border-radius: 10px;
   }
   .progress-section-title {
-    font-weight: 700; font-size: .88rem; color: var(--ink); margin-bottom: 10px;
+    font-weight: 700; font-size: .88rem; color: var(--ink); margin-bottom: 2px;
     display: flex; align-items: center; gap: 6px;
   }
   .progress-item {
-    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
-    padding: 8px 0; border-bottom: 1px solid var(--paper-line); font-size: .85rem;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    padding: 6px 0; border-bottom: 1px solid var(--paper-line); font-size: .85rem;
   }
   .progress-item:last-of-type { border-bottom: none; }
   .progress-plan-label {
@@ -1001,9 +1001,9 @@
     background: #f8f9ff;
     border-left: 3px solid #93c5fd;
     border-radius: 0 6px 6px 0;
-    padding: 8px 10px 8px 12px;
+    padding: 6px 8px 6px 10px;
     border-bottom: none;
-    margin-bottom: 6px;
+    margin-bottom: 4px;
   }
   .progress-item.review-item.t2 { border-left-color: #6ee7b7; background: #f0fdf4; }
   .progress-item.review-item.t3 { border-left-color: #fcd34d; background: #fffbeb; }
@@ -1195,25 +1195,39 @@
 
   /* ══════════════════════════════════════════════
      進捗入力 新UI（ボタン＋ステッパー方式）
+     ※ コンパクト化：「完了しましたか？」見出し／記録バッジ／余剰パネルの見出し・「記録」ボタンを廃止
   ══════════════════════════════════════════════ */
-  .prog-control-ui { margin-top: 8px; }
+  .prog-control-ui { margin-top: 6px; }
 
-  /* ─ 完了 / 未完了 選択ステップ ─ */
-  .prog-step1-label {
-    font-size: .78rem; font-weight: 700; color: var(--ink-soft);
-    margin-bottom: 6px; display: flex; align-items: center; gap: 5px;
+  /* ─ 折り畳みグループ（今日のタスク／復習タスク） ─ */
+  details.prog-group {
+    margin-top: 8px;
+    border: 1px solid var(--paper-line); border-radius: 8px; background: var(--white);
   }
-  .prog-step1-label::before {
-    content: '①'; font-size: .7rem; background: var(--ink-soft); color: var(--white);
-    border-radius: 50%; width: 16px; height: 16px;
-    display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  details.prog-group > summary {
+    cursor: pointer; list-style: none; user-select: none;
+    display: flex; align-items: center; gap: 6px;
+    padding: 7px 10px; font-size: .82rem; font-weight: 700; color: var(--ink);
   }
-  .prog-step1-label.step-done::before { background: var(--success); }
-  .prog-step1-label.step-partial::before { background: var(--gold); }
-  .prog-toggle { display: flex; gap: 8px; flex-wrap: wrap; }
+  details.prog-group > summary::-webkit-details-marker { display: none; }
+  details.prog-group > summary::before {
+    content: "▸"; display: inline-block; width: 1em; color: var(--ink-soft); font-size: .78rem;
+  }
+  details.prog-group[open] > summary::before { content: "▾"; }
+  .prog-group-count { font-size: .72rem; font-weight: 600; color: var(--ink-soft); }
+  .prog-group-rec {
+    margin-left: auto; font-size: .72rem; font-weight: 700; color: var(--success);
+    background: var(--success-bg); border: 1px solid #bcd6c4; border-radius: 4px; padding: 1px 6px;
+    white-space: nowrap;
+  }
+  .prog-group-body { padding: 0 10px 6px; border-top: 1px solid var(--paper-line); }
+  .prog-group-body .progress-review-divider { margin: 8px 0 4px; }
+
+  /* ─ 完了 / 途中まで / 進んでいない ボタン ─ */
+  .prog-toggle { display: flex; gap: 6px; flex-wrap: wrap; }
   .prog-btn {
     display: inline-flex; align-items: center; gap: 5px;
-    padding: 9px 16px; font-size: .88rem; font-weight: 700;
+    padding: 6px 12px; font-size: .82rem; font-weight: 700;
     border-radius: 8px; cursor: pointer; border: 1.5px solid transparent;
     transition: all .18s; font-family: 'Noto Sans JP', sans-serif;
     box-shadow: none;
@@ -1245,25 +1259,19 @@
   }
   .prog-btn-not-progressed:hover:not(.prog-btn-active) { border-color: var(--ink-soft); color: var(--ink); }
 
-  /* ─ step1ラベル：進んでいない状態 ─ */
-  .prog-step1-label.step-not-progressed::before { background: var(--ink-soft); }
-
-  /* ─ ステータスバッジ（既存記録あり時） ─ */
-  .prog-status-wrap { margin-top: 6px; }
-
   /* ─ 途中まで パネル ─ */
   .prog-partial-panel {
-    margin-top: 10px; padding: 12px 14px;
+    margin-top: 6px; padding: 8px 10px;
     background: var(--white); border: 1px solid var(--paper-line); border-radius: 8px;
   }
 
   /* ─ 完了数 / プログレスバー行 ─ */
   .prog-count-row {
     display: flex; align-items: center; gap: 8px;
-    font-size: .82rem; margin-bottom: 10px;
+    font-size: .82rem; margin-bottom: 6px;
   }
   .prog-count-val {
-    font-family: 'IBM Plex Mono', monospace; font-weight: 700; font-size: 1.15rem;
+    font-family: 'IBM Plex Mono', monospace; font-weight: 700; font-size: 1.1rem;
     color: var(--ink);
   }
   .prog-count-total { color: var(--ink-soft); flex: 1; }
@@ -1275,10 +1283,9 @@
     height: 100%; background: var(--gold); border-radius: 4px; transition: width .25s;
   }
 
-  /* ─ ±ステッパー行 ─ */
+  /* ─ 数値入力行 ─ */
   .prog-stepper {
     display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-    margin-bottom: 8px;
   }
   .prog-display {
     font-family: 'IBM Plex Mono', monospace; font-weight: 700; font-size: 1.05rem;
@@ -1286,116 +1293,72 @@
     background: var(--paper); border: 1.5px solid var(--ink); border-radius: 6px;
     padding: 5px 8px; display: inline-block;
   }
-  /* 直接タイピング可能な数値入力フィールド */
-  .prog-display-input {
-    font-family: 'IBM Plex Mono', monospace; font-weight: 700; font-size: 1.05rem;
-    width: 72px; text-align: center;
+  /* 直接タイピング可能な数値入力フィールド
+     ※ 全体設定 input[type=number] に詳細度で負けないよう input.クラス名 で指定 */
+  input.prog-display-input {
+    font-family: 'IBM Plex Mono', monospace; font-weight: 700; font-size: 1rem;
+    width: 68px; text-align: center;
     background: var(--white); border: 2px solid var(--ink); border-radius: 6px;
-    padding: 5px 8px; color: var(--ink); cursor: text;
+    padding: 3px 6px; color: var(--ink); cursor: text;
     -moz-appearance: textfield;
   }
   .prog-display-input::-webkit-outer-spin-button,
   .prog-display-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-  .prog-display-input:focus { outline: 2px solid var(--gold); outline-offset: 1px; border-color: var(--gold); }
-  /* ページ数入力エリアの見出し */
-  .prog-partial-heading {
-    font-size: .78rem; font-weight: 700; color: var(--ink-soft);
-    margin-bottom: 8px; display: flex; align-items: center; gap: 5px;
-  }
-  .prog-partial-heading::before {
-    content: '②'; font-size: .7rem; background: var(--gold); color: var(--white);
-    border-radius: 50%; width: 16px; height: 16px;
-    display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
-  }
+  input.prog-display-input:focus { outline: 2px solid var(--gold); outline-offset: 1px; border-color: var(--gold); }
   .prog-unit { font-size: .82rem; color: var(--ink-soft); white-space: nowrap; }
 
-  /* ── 余剰ページ入力パネル ── */
+  /* ── 追加欄（予定より多く進んだ分）──
+     「完了」を押すと自動で表示。1行にまとめ、±1ボタンと入力欄は小さな固定サイズ。
+     ※ 全体設定 button{padding:10px 18px} / input[type=number]{padding:8px 10px} が
+        効いて ±1 の文字が枠からはみ出していたため、padding:0 と固定サイズで上書きする。 */
   .prog-extra-panel {
-    margin-top: 10px;
-    padding: 10px 12px;
-    background: #eaf6ee;
-    border: 1px solid #a8dab5;
-    border-radius: 8px;
+    margin-top: 6px; padding: 5px 8px;
+    background: #eaf6ee; border: 1px solid #a8dab5; border-radius: 8px;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
   }
-  .prog-extra-heading {
-    font-size: .8rem;
-    font-weight: 700;
-    color: #1b5e20;
-    margin-bottom: 8px;
+  .prog-extra-panel .prog-extra-no-btn {
+    height: 26px; padding: 0 10px; margin: 0;
+    border: 1px solid #9e9e9e; border-radius: 6px; background: #fff; color: #555;
+    font-size: .75rem; font-weight: 600; line-height: 1; cursor: pointer; box-shadow: none;
   }
-  .prog-extra-options {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
+  .prog-extra-panel .prog-extra-no-btn:hover { background: #f5f5f5; }
+  .prog-extra-panel .prog-extra-step {
+    position: relative; flex: 0 0 auto;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; min-width: 0; padding: 0; margin: 0;
+    border: 1px solid #9e9e9e; border-radius: 6px; background: #fff; color: var(--ink);
+    font-family: 'IBM Plex Mono', monospace; font-size: .72rem; font-weight: 700; line-height: 1;
+    cursor: pointer; box-shadow: none;
   }
-  .prog-extra-no-btn {
-    padding: 5px 12px;
-    border: 1px solid #9e9e9e;
-    border-radius: 6px;
-    background: #fff;
-    cursor: pointer;
-    font-size: .8rem;
-    color: #555;
+  /* 見た目は小さいまま、指で押せる範囲だけ周囲に広げる */
+  .prog-extra-panel .prog-extra-step::after {
+    content: ""; position: absolute; top: -4px; right: -3px; bottom: -4px; left: -3px;
   }
-  .prog-extra-no-btn:hover { background: #f5f5f5; }
-  .prog-extra-input-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
+  .prog-extra-panel .prog-extra-step:hover { background: #f5f5f5; }
+  .prog-extra-panel input.prog-extra-input {
+    flex: 0 0 auto; width: 40px; height: 26px; margin: 0; padding: 0 2px;
+    border: 1px solid #9e9e9e; border-radius: 6px; background: #fff; color: var(--ink);
+    font-family: 'IBM Plex Mono', monospace; font-size: .8rem; line-height: 1; text-align: center;
+    -moz-appearance: textfield;
   }
-  .prog-extra-input {
-    width: 54px;
-    text-align: center;
-    border: 1px solid #9e9e9e;
-    border-radius: 6px;
-    padding: 4px 6px;
-    font-size: .85rem;
-  }
-  .prog-extra-step {
-    width: 28px; height: 28px;
-    border: 1px solid #9e9e9e;
-    border-radius: 6px;
-    background: #fff;
-    cursor: pointer;
-    font-size: .85rem;
-  }
-  .prog-extra-unit {
-    font-size: .78rem;
-    color: #555;
-  }
-  .prog-extra-confirm-btn {
-    padding: 5px 12px;
-    border: none;
-    border-radius: 6px;
-    background: #2e7d32;
-    color: #fff;
-    cursor: pointer;
-    font-size: .8rem;
-    font-weight: 700;
-  }
-  .prog-extra-confirm-btn:hover { background: #1b5e20; }
+  .prog-extra-input::-webkit-outer-spin-button,
+  .prog-extra-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .prog-extra-unit { font-size: .75rem; color: #555; white-space: nowrap; }
 
-  /* ─ 「＋ 予定より多く進んだ」リンク（余剰パネルを開く） ─ */
-  .prog-extra-open-link {
-    background: none; border: none; box-shadow: none;
-    color: var(--ink-soft); font-size: .75rem; text-decoration: underline;
-    padding: 6px 0 0; cursor: pointer;
-  }
-
-  /* ─ モバイル最適化（進捗入力をコンパクトに：3ボタンを1段に・余白を詰める） ─ */
+  /* ─ モバイル最適化（3ボタンを1段に・余白を詰める） ─ */
   @media (max-width: 640px) {
-    .prog-step1-label { display: none; }  /* 「完了しましたか？」行は省略 */
     .prog-toggle { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
     .prog-btn {
       padding: 7px 2px; font-size: .75rem; min-height: 34px;
       justify-content: center; text-align: center; line-height: 1.2; border-radius: 6px;
     }
-    .prog-partial-panel { padding: 8px 10px; }
-    .prog-display-input { width: 60px; font-size: .95rem; padding: 3px 6px; }
-    .prog-extra-panel { padding: 6px 8px; margin-top: 6px; }
-    .prog-extra-heading { font-size: .72rem; margin-bottom: 4px; }
+    .prog-partial-panel { padding: 6px 8px; }
+    input.prog-display-input { width: 60px; font-size: .95rem; padding: 3px 6px; }
+    .prog-extra-panel { padding: 5px 8px; margin-top: 6px; }
     .progress-item { padding: 6px 0; gap: 4px; }
+    .progress-plan-label { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+    details.prog-group > summary { padding: 8px 10px; }
+    .prog-group-body { padding: 0 8px 4px; }
   }
 
 
@@ -1509,3 +1472,64 @@
 
     .chip { position: relative; }
   }
+
+/* ════════════════════════════════════════════════
+   モバイル：登録フォームのはみ出し修正／進捗入力を1タスク1行に
+   （このブロックは必ずファイル末尾に置く）
+════════════════════════════════════════════════ */
+.pl-range { margin-left: .4em; }
+.plan-mode-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 4px; }
+.plan-mode-row label { position: relative; display: flex; align-items: center; justify-content: center;
+  min-height: 40px; border: 1px solid var(--paper-line); border-radius: 8px; cursor: pointer;
+  font-size: .85rem; background: var(--paper); }
+.plan-mode-row input { position: absolute; opacity: 0; pointer-events: none; }
+.plan-mode-row label:has(input:checked) { background: var(--ink); color: var(--white); border-color: var(--ink); font-weight: 700; }
+
+@media (max-width: 640px) {
+  /* 登録フォーム：2列化＋入力欄がカードからはみ出さないように */
+  .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 10px; }
+  .form-grid > .field.full { grid-column: 1 / -1; }
+  .form-grid input, .field input { min-width: 0; width: 100%; box-sizing: border-box; }
+  .ref-setting-body { gap: 10px !important; }
+  .ref-setting-body .field.full { margin-bottom: 0 !important; }
+  #intervalRow + .hint, #refIntervalRow + .hint { display: none; }
+
+  /* 曜日(7)・復習間隔(8)：折り返さず、必ずカード幅に収める */
+  #weekdayRow, #refWeekdayRow { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+  #intervalRow, #refIntervalRow { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; }
+  #weekdayRow .chip, #refWeekdayRow .chip, #intervalRow .chip, #refIntervalRow .chip {
+    flex: none; min-width: 0; min-height: 40px; padding: 0; justify-content: center; font-size: .85rem;
+  }
+  #intervalRow .chip .unit, #refIntervalRow .chip .unit { display: none; }
+
+  /* 進捗入力：1タスク＝1行（ラベル｜✅⚠️🚫） */
+  .progress-section { padding: 6px !important; }
+  details.prog-group { margin-top: 6px; }
+  .prog-group-body { padding: 0 6px 4px; }
+  .progress-item, .progress-item.review-item {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center;
+    gap: 4px 6px; padding: 4px 0;
+  }
+  .progress-item.review-item { padding: 4px 6px 4px 8px; margin-bottom: 3px; }
+  .progress-plan-label {
+    display: flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%;
+    background: none; border: 0; padding: 0; font-size: .8rem; white-space: nowrap; overflow: hidden;
+  }
+  .progress-plan-label .pl-name { overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
+  .progress-plan-label .pl-range { flex: 0 0 auto; margin-left: 0; font-size: .85rem; }
+  .progress-plan-label > span:not(.pl-name):not(.pl-range):not(.pl-count) { flex: 0 0 auto; }
+  .progress-plan-label > span[class^="tag-review"] { padding: 1px 4px !important; font-size: .68rem !important; }
+  .progress-plan-label .pl-count, .progress-plan-label .pl-name-review,
+  .progress-plan-label .rb-ic, .progress-plan-label .rb-lv, .progress-plan-label .rb-late-t { display: none; }
+  .prog-group-body .progress-review-divider { margin: 6px 0 2px; font-size: .78rem; }
+  .prog-control-ui { display: contents; }
+  .prog-toggle { display: flex; gap: 4px; grid-column: 2; grid-row: 1; }
+  .prog-btn { padding: 0; width: 40px; height: 36px; justify-content: center; font-size: 1rem; gap: 0; }
+  .prog-btn .pb-t { display: none; }
+  .prog-partial-panel, .prog-extra-panel { grid-column: 1 / -1; margin-top: 2px; }
+}
+/* 途中まで分割された復習の目印：モバイルの1行入力では「元 11/02」を省略 */
+@media (max-width: 640px) {
+  .progress-plan-label .split-badge { flex: 0 0 auto; padding: 1px 4px !important; font-size: .68rem !important; }
+  .progress-plan-label .rem-t { display: none; }
+}
