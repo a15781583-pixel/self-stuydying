@@ -128,7 +128,7 @@ function buildIntervalChips(rowId = 'intervalRow', defaultIntervals = DEFAULT_IN
     const chip = document.createElement('label');
     const checked = defaultIntervals.includes(n);
     chip.className = 'chip' + (checked ? ' checked' : '');
-    chip.innerHTML = `<input type="checkbox" value="${n}" ${checked?'checked':''}> ${n}日後`;
+    chip.innerHTML = `<input type="checkbox" value="${n}" ${checked?'checked':''}> ${n}<span class="unit">日後</span>`;
     const cb = chip.querySelector('input');
     cb.addEventListener('change', () => chip.classList.toggle('checked', cb.checked));
     row.appendChild(chip);
