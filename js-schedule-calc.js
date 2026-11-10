@@ -39,7 +39,7 @@ function computeEffectiveReviewDate(originalIso, key){
   // ★【バグ3修正】p.date <= originalIso フィルターを追加。
   //    moved 完了後の残存レコード（p.date > originalIso）が、同一 base key を持つ
   //    別サイクルの復習を誤って「完了済み」と判定するのを防ぐ。
-  //    moved 完了は line 1735 の reviewDoneSet.add(baseKey) で確実に記録されるため、
+  //    moved 完了は recordReviewProgress 内の reviewDoneSet.add(baseKey) で確実に記録されるため、
   //    isDoneInPanel は originalIso 以前のレコードのみ対象とすれば十分。
   // 完了を示す進捗記録（パネル／チェックボックス共通）。移動済みキー(_moved_)も元キーに戻して照合する
   const isDoneRecord = p =>
@@ -157,7 +157,7 @@ function buildProgressReviews(progressItems, prefix, getResolved, getEntity, get
 }
 
 // 単語・参考書の全復習項目（本来の日付＋ずらし後の実効日付）をまとめて計算する共通関数。
-// renderMergedSchedule / renderIntegratedSchedule の両方から呼ばれる。
+// buildScheduleData 経由で renderIntegratedSchedule などから呼ばれる。
 // ★ 進捗記録がある場合は computeAdjustedChunksForEntry / computeAdjustedRefSchedule を使い
 //   残りのスケジュールを自動再配分する。
 function buildAllReviews(){
@@ -399,6 +399,65 @@ function splitPartialReviews(reviews) {
 }
 
 /**
+ * 復習の遅れを、あとの復習ステップへ順番に引き継ぐ（単語・参考書共通）。
+ *
+ * 考え方：同じ範囲の復習（例：1日後 → 3日後 → 7日後 → 14日後）は、ステップの順番どおりに並ぶ。
+ *   あるステップが遅れたら、そのあとのステップも「元の間隔を保ったまま」同じ日数だけ後ろへずれる。
+ *     例）1日後(元11/3)が11/5にずれた → 遅れ2日 → 3日後は11/5→11/7、7日後は11/9→11/11 …
+ *   ・遅れたステップより後ろのステップだけが動く（前のステップや、完了済みのものは動かさない）。
+ *   ・ステップの前後は入れ替わらない（1日後が3日後より先に必ず来る）。
+ *   ・完了したステップは、実際に行った日を基準にして次のステップへ引き継ぐ（遅れて完了なら、その遅れ分）。
+ *   ・途中まで入力した復習は「実施分」と「残り」に分かれているので、実施日の遅れ／残りの遅れのうち大きい方を引き継ぐ。
+ *     （残りが翌日期限になっただけでは、あとのステップは動かさない）
+ *  originalDate（本来の予定日）は変えない。週のまとめの集計などは originalDate を見るため影響しない。
+ */
+function reviewSourceKeyOf(r) {
+  // 例: w_e1_1_20_3 / w_e1_1_20_3_moved_2026-11-05 / w_e1_1_20_3~r11 / w_e1_1_20_3~r11~d → w_e1_1_20
+  return String(r.key)
+    .replace(MOVED_KEY_SUFFIX_RE, '')
+    .replace(/(?:~(?:d|r\d+))+$/, '')
+    .replace(/_\d+$/, '');
+}
+
+function cascadeReviewDelays(reviews) {
+  const dayOf = r => String(r.date).slice(0, 10);
+  const rootOrig = r => String(r.rootOriginalDate || r.originalDate).slice(0, 10);
+  const diff = (a, b) => Math.round((parseISO(a) - parseISO(b)) / 86400000);
+
+  // 同じ出どころ → ステップ(interval)ごとにまとめる
+  const sources = new Map();
+  reviews.forEach(r => {
+    const k = reviewSourceKeyOf(r);
+    if (!sources.has(k)) sources.set(k, new Map());
+    const byInterval = sources.get(k);
+    if (!byInterval.has(r.interval)) byInterval.set(r.interval, []);
+    byInterval.get(r.interval).push(r);
+  });
+
+  const replaced = new Map(); // 元の review オブジェクト → 日付を後ろへずらした新オブジェクト
+  sources.forEach(byInterval => {
+    let carry = 0; // 手前のステップから引き継ぐ遅れ日数
+    Array.from(byInterval.keys()).sort((a, b) => a - b).forEach(interval => {
+      const group = byInterval.get(interval);
+      const hasSplit = group.some(r => r.partialDone || r.isRemainder);
+      if (!hasSplit) {
+        const r = group[0];
+        const orig = rootOrig(r);
+        if (r.done) { carry = Math.max(0, diff(dayOf(r), orig)); return; }
+        const floor = formatISO(addDays(parseISO(orig), carry)); // 元の間隔を保った最短の日
+        const d = dayOf(r) >= floor ? dayOf(r) : floor;
+        if (d !== dayOf(r)) replaced.set(r, { ...r, date: d, delayedDays: diff(d, orig) });
+        carry = Math.max(0, diff(d, orig));
+        return;
+      }
+      // 途中まで入力された復習：実施日の遅れ／残りの遅れのうち大きい方を引き継ぐ
+      carry = Math.max(0, ...group.map(r => r.done ? diff(dayOf(r), rootOrig(r)) : (r.delayedDays || 0)));
+    });
+  });
+  return reviews.map(r => replaced.get(r) || r);
+}
+
+/**
  * スケジュール描画用の共通データ（チャンク・繰り上げ・復習調整済み）をまとめて返す。
  */
 function buildScheduleData() {
@@ -408,6 +467,9 @@ function buildScheduleData() {
   // 復習の「途中まで」を、実施した分（完了）と残り（翌日以降のタスク）に分ける
   adjusted.vocabReviews = splitPartialReviews(adjusted.vocabReviews);
   adjusted.refReviews = splitPartialReviews(adjusted.refReviews);
+  // 復習が遅れたら、同じ範囲のあとの復習ステップも、元の間隔を保ったまま同じ日数だけ後ろへずらす
+  adjusted.vocabReviews = cascadeReviewDelays(adjusted.vocabReviews);
+  adjusted.refReviews = cascadeReviewDelays(adjusted.refReviews);
   return {
     rawVocabChunks,
     rawRefChunks,
