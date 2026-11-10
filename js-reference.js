@@ -23,23 +23,23 @@ onDomReady(() => {
 
   // 学習する曜日のチップを生成（単語スケジュールと同じ仕組みを再利用）
   buildWeekdayChips('refWeekdayRow', DEFAULT_WEEKDAYS);
-  // 復習インターバルは進捗入力時に DEFAULT_INTERVALS で自動生成するため、チップ選択UIは不要
+  // 復習のタイミング（登録時に選んだ間隔）のチップ。選んだ値は plan.intervals として保存され、復習日の計算に使われる
   buildIntervalChips('refIntervalRow');
 
   // 割り振り方法（曜日から設定 / 1日あたりの量から設定）の切り替え
   document.querySelectorAll('input[name="refPlanMode"]').forEach(radio => {
     radio.addEventListener('change', (e) => {
       const isByAmount = e.target.value === 'byAmount';
-      document.getElementById('refAmountFieldWrap').style.display = isByAmount ? 'block' : 'none';
-      document.getElementById('refEndDateWrap').style.display = isByAmount ? 'none' : 'block';
+      // 単語側と同じく、表示は '' （CSS既定の表示）に戻す。'block' 固定だとレイアウトが変わる場合がある
+      document.getElementById('refAmountFieldWrap').style.display = isByAmount ? '' : 'none';
+      document.getElementById('refEndDateWrap').style.display = isByAmount ? 'none' : '';
     });
   });
   // 【追加】初期表示でも、選択中の割り振り方法に合わせて入力欄の表示を揃える
   document.querySelector('input[name="refPlanMode"]:checked')?.dispatchEvent(new Event('change'));
 
-  // loadRefEntries() / renderIntegratedSchedule() / renderRefTodayCard() は
-  // init() → loadRefEntries() → renderRefSchedule() → renderRefTodayCard() の
-  // ルートで既にカバーされているため、ここでの呼び出しは不要（二重実行・競合防止）
+  // loadRefEntries() / renderIntegratedSchedule() は、起動時に js-main.js の init() が
+  // 呼ぶため、ここでの呼び出しは不要（二重実行・競合防止）
 
   // ③ 「スケジュールを登録」ボタンが押された時の処理
   // バリデーション・保存・再描画の骨組みは handleSaveEntry（単語と共通）に委譲し、
@@ -56,11 +56,18 @@ onDomReady(() => {
         exitEditMode: exitRefEditMode,
         // 【追加】編集保存後は、編集を始める前のフォーム内容へ戻す（復習間隔・曜日などの持ち越し防止）
         finishEditAfterSave: finishRefEditAfterSave,
-        // 【追加】範囲を変えると進捗記録が削除されるため、記録がある場合は保存前に確認する
-        confirmEdit: (item, nf) =>
-          (item.startNum === nf.startNum && item.endNum === nf.endNum) ||
-          !dailyProgress.some(p => p.type === 'book' && (p.planId || p.entryId) === item.id) ||
-          confirm('範囲（開始・終了ページ）を変えると、この参考書のこれまでの進捗記録が削除されます。続けますか？'),
+        // 【追加】範囲を変えると進捗記録が削除されるため、記録がある場合は保存前に確認する。
+        //   開始日・期間・曜日・1日の量を変える場合も、復習の日付や完了状態がずれることがあるため確認する
+        confirmEdit: (item, nf) => {
+          if (!hasMaterialRecords('book', item.id)) return true;
+          if (item.startNum !== nf.startNum || item.endNum !== nf.endNum) {
+            return confirm('範囲（開始・終了ページ）を変えると、この参考書のこれまでの進捗記録が削除されます。続けますか？');
+          }
+          if (isScheduleShapeChanged(item, nf)) {
+            return confirm('開始日・期間・曜日・1日の量を変えると、学習範囲の割り振りが変わり、復習の日付や完了状態がずれる場合があります。続けますか？');
+          }
+          return true;
+        },
         // 参考書は編集時、旧プランをスプレッドせず新しいフィールド一式に置き換える
         // （byAmount/byRangeの切替時に古いendDate/amountPerDayが残らないようにするため）
         applyEdit: (item, newFields) => {
@@ -84,9 +91,8 @@ onDomReady(() => {
             document.getElementById('refEndPage').value = '';
           }
 
-          // 登録完了後：設定アコーディオンを閉じて「今日の確認」に注目させる
-          const settingDetails = document.getElementById('refSettingDetails');
-          if (settingDetails) settingDetails.open = false;
+          // 登録完了後も「参考書を登録」の折り畳みは開いたままにする（続けて次の参考書を登録できるように）。
+          // 閉じる／開くは生徒が見出しをタップして自分で切り替える。
         },
       });
     });
@@ -161,8 +167,20 @@ function buildAndValidateRefEntry(showError){
   }
 
   // 事前にスケジュールを計算し、該当日がなければ登録前に知らせる
-  if (computeRefSchedule(newPlan).length === 0) {
+  const previewChunks = computeRefSchedule(newPlan);
+  if (previewChunks.length === 0) {
     showError('指定した期間・曜日では学習日がありません。設定を見直してください。');
+    return null;
+  }
+  // 1日の量が少なすぎて（約10年分の上限で）終了ページまで割り振れない場合は、登録前に知らせる
+  if (previewChunks[previewChunks.length - 1].rangeEnd < endNum) {
+    showError('この設定では終了ページまで割り振れません。1日あたりの量を増やすか、範囲を分けて登録してください。');
+    return null;
+  }
+
+  // 同じ教材名でページが重なる登録があれば、重複して予定に並ぶ前に確認する
+  const overlap = findOverlappingEntry(refEntries, bookName, startNum, endNum, editingRefEntryId);
+  if (overlap && !confirm(`「${bookName}」の ${overlap.startNum}〜${overlap.endNum} と範囲が重なっています。同じ範囲が重複してスケジュールされますが、登録しますか？`)) {
     return null;
   }
 
@@ -170,16 +188,14 @@ function buildAndValidateRefEntry(showError){
 }
 
 function saveRefEntries() {
-  saveToStorage(REF_STORAGE_KEY, refEntries);
+  return saveToStorage(REF_STORAGE_KEY, refEntries);
 }
 function loadRefEntries() {
   refEntries = loadFromStorage(REF_STORAGE_KEY);
   if (refEntries.length > 0) {
     renderRefSchedule(); // 読み込み後すぐに描画
-    // 既にスケジュールが登録されている場合：設定アコーディオンを初期状態で閉じる
-    // （「今日の確認」エリアを最初に見せることでUXを改善）
-    const settingDetails = document.getElementById('refSettingDetails');
-    if (settingDetails) settingDetails.open = false;
+    // 「参考書を登録」の折り畳みは、登録済みの参考書があっても開いたままにする
+    // （生徒が続けて登録できるように。閉じる／開くは生徒が見出しで切り替える）
   }
 }
 
@@ -216,9 +232,12 @@ function renderRefEntryList(){
     onEdit: (id) => startEditRefEntry(id),
     onDelete: (id) => {
       if (!confirm('この参考書のスケジュールを削除しますか？')) return;
-      // 編集中の項目が削除された場合は編集モードを解除しておく（不整合防止）
-      if (editingRefEntryId === id) exitRefEditMode();
+      // 編集中の項目が削除された場合は、編集前のフォームへ戻して編集モードを解除する
+      // （戻さないと、削除した内容がフォームに残ったまま再登録できてしまう）
+      if (editingRefEntryId === id) cancelEditRefEntry();
       refEntries = refEntries.filter(p => p.id !== id);
+      // 削除した参考書に紐づく進捗記録・復習の完了記録も取り除く
+      purgeMaterialData('book', id);
       saveRefEntries();
       renderRefSchedule();
     },
@@ -258,9 +277,8 @@ function exitRefEditMode(){ refFormController.exitEditMode(); }
 function cancelEditRefEntry(){ refFormController.cancelEdit(); }
 function finishRefEditAfterSave(){ refFormController.finishEditAfterSave(); }
 
-// ⑤ 参考書タブ全体の再描画（登録リスト＋今日やること）
+// ⑤ 参考書タブ全体の再描画（登録リスト）
+// ※ スケジュールタブの表示は、タブを開いたとき（showTab）に renderIntegratedSchedule が再描画する
 function renderRefSchedule() {
   renderRefEntryList();
-  refreshAllSchedules();
-  renderRefTodayCard();
 }
