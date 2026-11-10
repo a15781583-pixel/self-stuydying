@@ -13,7 +13,7 @@ async function loadEntries(){
   entries = loadFromStorage(STORAGE_KEY);
 }
 async function saveEntries(){
-  saveToStorage(STORAGE_KEY, entries);
+  return saveToStorage(STORAGE_KEY, entries);
 }
 
 /* ───────── 登録済み単語スケジュールの一覧表示 ───────── */
@@ -45,9 +45,12 @@ function renderEntryList(){
     onDelete: async (id) => {
       // 【修正】参考書側と同様に、誤クリックでスケジュールが消えないよう確認する
       if (!confirm('この単語のスケジュールを削除しますか？')) return;
-      // 編集中の項目が削除された場合は編集モードを解除しておく（不整合防止）
-      if (editingEntryId === id) exitEntryEditMode();
+      // 編集中の項目が削除された場合は、編集前のフォームへ戻して編集モードを解除する
+      // （戻さないと、削除した内容がフォームに残ったまま再登録できてしまう）
+      if (editingEntryId === id) cancelEditEntry();
       entries = entries.filter(e => e.id !== id);
+      // 削除した単語に紐づく進捗記録・復習の完了記録も取り除く
+      purgeMaterialData('word', id);
       await saveEntries();
       renderAll();
     },
@@ -122,13 +125,30 @@ function buildAndValidateWordEntry(showError){
     showError('1日あたりの単語数を正しく入力してください。'); return null;
   }
 
-  const newFields = { bookName, startNum, endNum, startDate, endDate, weekdays, intervals, planMode, amountPerDay };
+  // 使わない側の項目は保存しない（モード切替後に古い終了日・1日の量が復元されるのを防ぐ。参考書側と同じ扱い）
+  const newFields = {
+    bookName, startNum, endNum, startDate, weekdays, intervals, planMode,
+    endDate: planMode === 'byRange' ? endDate : undefined,
+    amountPerDay: planMode === 'byAmount' ? amountPerDay : undefined,
+  };
 
   // 事前にスケジュールを計算し、該当する学習日が1日もなければ登録前に知らせる（参考書側の登録と同じ検証）。
   // 例：開始日〜終了日の間に、選んだ学習曜日が1日も含まれない場合。
   // この検証がないと、登録一覧には出るのにスケジュールには1件も出ない状態になってしまう。
-  if (computeChunksForEntry(newFields).length === 0) {
+  const previewChunks = computeChunksForEntry(newFields);
+  if (previewChunks.length === 0) {
     showError('指定した期間・曜日では学習日がありません。開始日〜終了日の間に、選んだ学習曜日が含まれるよう設定を見直してください。');
+    return null;
+  }
+  // 1日の量が少なすぎて（約10年分の上限で）終了番号まで割り振れない場合は、登録前に知らせる
+  if (previewChunks[previewChunks.length - 1].rangeEnd < endNum) {
+    showError('この設定では終了番号まで割り振れません。1日あたりの単語数を増やすか、範囲を分けて登録してください。');
+    return null;
+  }
+
+  // 同じ教材名で番号が重なる登録があれば、重複して予定に並ぶ前に確認する
+  const overlap = findOverlappingEntry(entries, bookName, startNum, endNum, editingEntryId, '単語');
+  if (overlap && !confirm(`「${bookName || '単語'}」の ${overlap.startNum}〜${overlap.endNum} と範囲が重なっています。同じ範囲が重複してスケジュールされますが、登録しますか？`)) {
     return null;
   }
 
@@ -146,11 +166,18 @@ async function handleAdd(){
     exitEditMode: exitEntryEditMode,
     // 【追加】編集保存後は、編集を始める前のフォーム内容へ戻す（復習間隔・曜日などの持ち越し防止）
     finishEditAfterSave: finishEntryEditAfterSave,
-    // 【追加】範囲を変えると進捗記録が削除されるため、記録がある場合は保存前に確認する
-    confirmEdit: (item, nf) =>
-      (item.startNum === nf.startNum && item.endNum === nf.endNum) ||
-      !dailyProgress.some(p => p.type === 'word' && (p.originEntryId || p.entryId) === item.id) ||
-      confirm('範囲（開始・終了番号）を変えると、この単語のこれまでの進捗記録が削除されます。続けますか？'),
+    // 【追加】範囲を変えると進捗記録が削除されるため、記録がある場合は保存前に確認する。
+    //   開始日・期間・曜日・1日の量を変える場合も、復習の日付や完了状態がずれることがあるため確認する
+    confirmEdit: (item, nf) => {
+      if (!hasMaterialRecords('word', item.id)) return true;
+      if (item.startNum !== nf.startNum || item.endNum !== nf.endNum) {
+        return confirm('範囲（開始・終了番号）を変えると、この単語のこれまでの進捗記録が削除されます。続けますか？');
+      }
+      if (isScheduleShapeChanged(item, nf)) {
+        return confirm('開始日・期間・曜日・1日の量を変えると、学習範囲の割り振りが変わり、復習の日付や完了状態がずれる場合があります。続けますか？');
+      }
+      return true;
+    },
     applyEdit: (item, newFields) => {
       // ★修正：範囲（開始・終了番号）を変えた場合、旧範囲に基づく進捗記録を破棄する
       //   （残すと新範囲の外の番号が再配分されるため）
