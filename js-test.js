@@ -33,6 +33,10 @@ async function handleLeechAdd(){
   const word = wordEl.value.trim();
   const meaning = meaningEl.value.trim();
   if(!word){ errorEl.textContent = '単語を入力してください。'; return; }
+  // 登録中の同じ単語（大文字小文字・前後の空白は無視）の二重登録を防ぐ
+  if(leechWords.some(w => w.status === 'active' && String(w.word).trim().toLowerCase() === word.toLowerCase())){
+    errorEl.textContent = '同じ単語がすでに登録されています。'; return;
+  }
   leechWords.push({
     id: genId('w_'), word, meaning, stepIndex: 0,
     nextReviewDate: nextDateForStep(0), missCount: 0, status: 'active'
@@ -69,6 +73,7 @@ async function handleLeechWrong(id){
 }
 
 async function handleLeechDelete(id){
+  if(!confirm('この単語を削除しますか？')) return;
   leechWords = leechWords.filter(w => w.id !== id);
   await saveLeech();
   renderLeech();
@@ -291,6 +296,7 @@ async function handleScoreAdd(){
 }
 
 async function handleScoreDelete(id){
+  if(!confirm('この成績を削除しますか？')) return;
   scoreRecords = scoreRecords.filter(r => r.id !== id);
   await saveScores();
   renderScoreList();
