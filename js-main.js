@@ -21,7 +21,8 @@ function showTab(tabName) {
   Object.entries(tabBtns).forEach(([name, id]) => {
     // 【修正】スケジュールだけ ID の命名規則が異なるため、見つからない場合は tab-btn-◯◯ も探す
     const el = document.getElementById(id) || document.getElementById('tab-btn-' + name);
-    if (el) el.className = name === tabName ? 'btn-primary' : 'btn-ghost';
+    // className を丸ごと書き換えず、他のクラスを保ったまま切り替える
+    if (el) { el.classList.toggle('btn-primary', name === tabName); el.classList.toggle('btn-ghost', name !== tabName); }
   });
 
   // モバイル用ボトムナビの active 切り替え
@@ -49,6 +50,23 @@ function showTab(tabName) {
 //                    appendMessage / handleChatSend / generateFinalPlan /
 //                    continueChat / resetChat）→ ai-features.html に移動
 // [ai-features.html] loadSavedApiKey / saveApiKey / setupApiKeyPersistence → ai-features.html に移動
+
+/* ───────── 日付が変わったときの再描画 ─────────
+   画面を開いたまま日付をまたぐと「今日」が前日のままになるため、
+   画面が再び表示されたとき・フォーカスが戻ったときに日付を確認して再描画する。 */
+let _lastActiveDate = todayISO();
+function refreshIfDateChanged() {
+  const now = todayISO();
+  if (now === _lastActiveDate) return;
+  _lastActiveDate = now;
+  try { renderIntegratedSchedule(); }
+  catch (e) { console.error('[refreshIfDateChanged] スケジュールの再描画に失敗:', e); }
+  try { renderMonthGoalCard(); }
+  catch (e) { console.error('[refreshIfDateChanged] 月目標の再描画に失敗:', e); }
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshIfDateChanged(); });
+window.addEventListener('focus', refreshIfDateChanged);
+window.addEventListener('pageshow', refreshIfDateChanged);
 
 (async function init(){
   // 【修正】チップ生成で例外が出ても、後続の起動処理（データ読込・スケジュール表示）を止めない
